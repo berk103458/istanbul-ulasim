@@ -13,54 +13,17 @@ import { KV } from "./core/storage.js";
 import { Bridge } from "./core/bridge.js";
 import { API } from "./core/api.js";
 import { iconSvg } from "./ui/icons.js";
-import { initLang, setLang, t } from "./i18n/index.js";
+import { initLang, t } from "./i18n/index.js";
 import { DataProvider } from "./engines/dataProvider.js";
 import { NotificationEngine } from "./engines/notificationEngine.js";
 import { createMapController, esc, hataMesaji } from "./map/mapController.js";
+import { createAppStore, restorePreferences } from "./state/store.js";
 import { createNearbyView, HIZLI_SEMTLER } from "./views/nearbyView.js";
 
 const CANLI_SN = 5;
 
-const S = {
-  sekme: "yakin",
-  yigin: [],
-  ben: null,
-  semt: null,
-  favoriler: ["18K", "14BK"],
-  favoriDuraklar: [],
-  durak: {},
-  savedPlaces: { ev: null, is: null },
-  hatVeri: {},
-  arac: new Map(),
-  aktifHatlar: new Set(),
-  trafik: false,
-  ispark: false,
-  filoRadar: false,
-  theme: "system",
-  mapStyle: "standart",
-  proxyUrl: "",
-  arama: "",
-  busKat: "tumu",
-  rayliArama: "",
-  vapurArama: "",
-  vapurGrup: "Tümü",
-  rota: {
-    nereden: null,
-    nereye: null,
-    aktif: null,
-    metin: "",
-    oneriler: [],
-    sonuclar: null,
-    gosterilenSonuclar: null,
-    filtre: "onerilen",
-    durum: "",
-    son: [],
-    zaman: null,
-  },
-  ag: null,
-  stopLinesIndex: null,
-  agVapur: false,
-};
+const store = createAppStore();
+const S = store.get();
 
 let cizimNo = 0;
 let panelZamanlayici = null;
@@ -854,40 +817,16 @@ async function bootstrap() {
   initLang();
   ensureToastContainer();
 
-  const [f, fd, d, s, sp, th, ms, pr, tr, ip, lg] = await Promise.all([
-    KV.get("favoriler"),
-    KV.get("favoriDuraklar"),
-    KV.get("durak"),
-    KV.get("sonYerler"),
-    KV.get("savedPlaces"),
-    KV.get("theme"),
-    KV.get("mapStyle"),
-    KV.get("proxyUrl"),
-    KV.get("trafik"),
-    KV.get("ispark"),
-    KV.get("lang"),
-  ]);
-
-  if (lg === "tr" || lg === "en") setLang(lg);
-  if (Array.isArray(f)) S.favoriler = f;
-  if (Array.isArray(fd)) S.favoriDuraklar = fd;
-  if (d && typeof d === "object") S.durak = d;
-  if (Array.isArray(s)) S.rota.son = s;
-  if (sp && typeof sp === "object") S.savedPlaces = sp;
-  if (th) S.theme = th;
-  if (ms) S.mapStyle = ms;
-  if (pr) {
-    S.proxyUrl = pr;
-    if (typeof Bridge.setProxyUrl === "function") Bridge.setProxyUrl(pr);
-  }
+  const { trafik, ispark } = await restorePreferences(store);
+  if (S.proxyUrl && typeof Bridge.setProxyUrl === "function") Bridge.setProxyUrl(S.proxyUrl);
 
   applyTheme(S.theme);
 
-  S.trafik = Boolean(tr);
+  store.set({ trafik });
   document.querySelector("#trafikBtn")?.classList.toggle("aktif", S.trafik);
   if (S.trafik) mc.trafikYukle();
 
-  S.ispark = Boolean(ip);
+  store.set({ ispark });
   document.querySelector("#isparkBtn")?.classList.toggle("aktif", S.ispark);
   if (S.ispark) mc.isparkYukle();
 
