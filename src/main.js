@@ -1,5 +1,5 @@
 /**
- * İstanbul Ulaşım v5.0 — Lazy-Loaded Bootstrap, Surgical Live DOM Updates & SSE Integration
+ * İstanbul Ulaşım v5.0.0 — Lazy-Loaded Bootstrap, Surgical Live DOM Updates & SSE Integration
  */
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";

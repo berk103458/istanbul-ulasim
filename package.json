@@ -1,6 +1,6 @@
 {
   "name": "istanbul-ulasim",
-  "version": "4.0.0",
+  "version": "5.0.0",
   "private": true,
   "type": "module",
   "description": "İstanbul Ulaşım — Canlı Otobüs, Metrobüs, Metro, Marmaray, Vapur, İSPARK ve Akıllı Rota Planlayıcı",
@@ -11,6 +11,7 @@
     "start": "node server.js",
     "icons": "node scripts/generate-icons.mjs",
     "build:scriptable": "node scripts/build-scriptable.mjs",
+    "pretest": "npm run build",
     "test": "node tests/verify-all.mjs"
   },
   "dependencies": {
