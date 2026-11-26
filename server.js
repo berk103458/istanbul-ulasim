@@ -2,6 +2,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { handleProxyRequest, CORS_HEADERS } from "./server/proxyCore.js";
 import { sharedCache } from "./server/cacheLayer.js";
@@ -15,6 +16,7 @@ import {
 } from "./server/googleMapsProxy.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const { version } = createRequire(import.meta.url)("./package.json");
 const DIST_DIR = path.join(__dirname, "dist");
 const PUBLIC_DIR = path.join(__dirname, "public");
 
@@ -154,7 +156,7 @@ export function createServer() {
         JSON.stringify({
           ok: true,
           service: "istanbul-ulasim",
-          version: "5.0.0",
+          version,
           googleMapsConfigured: isGoogleMapsConfigured(),
           redis: m.cache.redis,
           providers: m.providers,
@@ -226,6 +228,6 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const port = Number(process.env.PORT) || 4173;
   const server = createServer();
   server.listen(port, "0.0.0.0", () => {
-    console.log(`Istanbul Ulasim v5.0 server listening on http://localhost:${port}`);
+    console.log(`Istanbul Ulasim v${version} server listening on http://localhost:${port}`);
   });
 }
