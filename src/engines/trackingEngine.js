@@ -1,3 +1,5 @@
+import { Core } from "../core/geo.js";
+
 /**
  * High-performance Fleet Tracking Engine:
  * - Viewport culling
@@ -30,9 +32,7 @@ export const TrackingEngine = (() => {
     if (!b) return vehicles;
     return vehicles.filter(
       (v) =>
-        v &&
-        Number.isFinite(v.lat) &&
-        Number.isFinite(v.lon) &&
+        Core.gecerliKonum(v) &&
         v.lat >= b.minLat &&
         v.lat <= b.maxLat &&
         v.lon >= b.minLon &&
@@ -48,7 +48,8 @@ export const TrackingEngine = (() => {
    * @returns {Array<{ type: "cluster", lat: number, lon: number, count: number } | { type: "single", bus: object }>}
    */
   function clusterVehicles(vehicles, zoom = 14, bounds = null) {
-    const visible = bounds ? filterVisibleVehicles(vehicles, bounds) : vehicles || [];
+    if (!Array.isArray(vehicles)) return [];
+    const visible = bounds ? filterVisibleVehicles(vehicles, bounds) : vehicles.filter(Core.gecerliKonum);
     if (!visible.length) return [];
     if (zoom >= 14) {
       return visible.map((bus) => ({ type: "single", bus }));
@@ -58,7 +59,6 @@ export const TrackingEngine = (() => {
     const cells = new Map();
 
     for (const bus of visible) {
-      if (!bus || !Number.isFinite(bus.lat) || !Number.isFinite(bus.lon)) continue;
       const gx = Math.floor(bus.lat / cellDeg);
       const gy = Math.floor(bus.lon / cellDeg);
       const key = `${gx}:${gy}`;

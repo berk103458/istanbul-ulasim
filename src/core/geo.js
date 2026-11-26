@@ -3,6 +3,10 @@ export const Core = (() => {
   const R = 6371000;
   const rad = (d) => (d * Math.PI) / 180;
 
+  function gecerliKonum(p) {
+    return Number.isFinite(p?.lat) && Number.isFinite(p?.lon);
+  }
+
   function mesafe(a, b) {
     const dLat = rad(b.lat - a.lat);
     const dLon = rad(b.lon - a.lon);
@@ -34,7 +38,8 @@ export const Core = (() => {
   }
 
   function siradakiDurak(duraklar, bus) {
-    let i = duraklar.findIndex((d) => d.kod === bus.yakinDurak);
+    const kod = bus.yakinDurak;
+    let i = kod == null || kod === "" ? -1 : duraklar.findIndex((d) => d.kod === kod);
     if (i < 0) i = enYakinIndex(duraklar, bus).index;
     if (i < 0) return -1;
     if (i < duraklar.length - 1) {
@@ -76,7 +81,7 @@ export const Core = (() => {
       .sort((a, b) => a.t.metre - b.t.metre);
   }
 
-  return { mesafe, yonAcisi, enYakinIndex, siradakiDurak, ortalamaHiz, varisTahmini, yaklasanlar };
+  return { gecerliKonum, mesafe, yonAcisi, enYakinIndex, siradakiDurak, ortalamaHiz, varisTahmini, yaklasanlar };
 })();
 
 // Google polyline çözücü (Transitous hassasiyet 7 kullanır)

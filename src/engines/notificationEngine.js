@@ -50,11 +50,15 @@ export const NotificationEngine = (() => {
    */
   function watchStopBus(hat, durakAd, thresholdMin = 3) {
     const id = "w_" + nextId++;
+    const threshold = typeof thresholdMin === "string" && thresholdMin.trim()
+      ? Number(thresholdMin)
+      : thresholdMin;
+    const alertThreshold = Math.max(1, Number.isFinite(threshold) ? threshold : 3);
     watches.set(id, {
       id,
       hat: String(hat || "").trim().toUpperCase(),
       durakAd: String(durakAd || "").trim(),
-      thresholdMin: Math.max(1, Number(thresholdMin) || 3),
+      thresholdMin: alertThreshold,
       createdAt: Date.now(),
     });
 
@@ -62,7 +66,7 @@ export const NotificationEngine = (() => {
       Notification.requestPermission().catch(() => {});
     }
 
-    showToast("Alarm Kuruldu", `${hat} · ${durakAd} (≤ ${thresholdMin} dk)`, "info");
+    showToast("Alarm Kuruldu", `${hat} · ${durakAd} (≤ ${alertThreshold} dk)`, "info");
     return id;
   }
 
@@ -87,11 +91,12 @@ export const NotificationEngine = (() => {
   function checkEtas(hat, durakAd, etas = []) {
     if (!watches.size || !Array.isArray(etas) || !etas.length) return;
     const normHat = String(hat || "").trim().toUpperCase();
+    const normDurak = String(durakAd || "").trim().toLowerCase();
     const now = Date.now();
 
     for (const w of watches.values()) {
       if (w.hat !== normHat) continue;
-      if (w.durakAd && durakAd && w.durakAd.toLowerCase() !== durakAd.toLowerCase()) continue;
+      if (w.durakAd && normDurak && w.durakAd.toLowerCase() !== normDurak) continue;
 
       const imminent = etas.find((e) => Number.isFinite(e.dakika) && e.dakika <= w.thresholdMin);
       if (!imminent) continue;
