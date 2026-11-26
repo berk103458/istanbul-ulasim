@@ -1,6 +1,6 @@
 # Mimari — İstanbul Ulaşım
 
-> Faz 0 dokümantasyonu. Bu belge mevcut kodu anlatır; **planlanan değişiklikler** bölümü açıkça ayrılmıştır. Kod değişikliği yapılmamıştır. Sürüm `package.json` `"version": "4.0.0"`; `src/main.js`, `src/map/mapController.js`, `src/core/router.js`, `server.js` gibi bazı iç başlıklar "v5.0" der; `worker.js` `4.0.0`, `server.js` `/api/health` `5.0.0` raporlar.
+> Faz 0 mimarisi. Uygulama sürümü `5.0.0` ve `package.json` dosyasında tanımlıdır. Tam Node sunucusunun `/api/health` ucu uygulama sürümünü raporlar.
 
 ---
 
@@ -164,6 +164,7 @@ assets-src/                  ikon kaynağı
 | `start` | `node server.js` |
 | `icons` | `node scripts/generate-icons.mjs` |
 | `build:scriptable` | `node scripts/build-scriptable.mjs` |
+| `pretest` | `npm run build` |
 | `test` | `node tests/verify-all.mjs` |
 
 Çağrılar: `npm run <script>`; `npm test` ≡ `npm run test`. `npm install` bağımlılık kurulumu (script değil). **Bağımlılık eklenmedi.** `scripts/build-static-data.mjs` herhangi bir npm script'e bağlı değildir.
@@ -209,7 +210,7 @@ assets-src/                  ikon kaynağı
 6. `DataProvider` sağlayıcı sağlığını günceller; UI `panelYenile` + `surgicalLiveUpdate`; `NotificationEngine.checkUpdates`; SSE (tam sunucu) `konumIsle` + `aracCiz`.
 7. **Kalıcılık:** `KV` (IndexedDB `istanbul-ulasim-v4`, `localStorage` fallback, `ulasim.proxyUrl`); `public/sw.js`; `localStorage` tema/dil. Kişisel veri harici sunucuya gönderilmez (sadece proxy'lenen **hedef URL/body**; örn. SOAP, Transitous koordinatları!).
 
-> Not: Transitous `plan`/`geocode`/`map/stops` istekleri kullanıcı konumu/koordinatlarını içerir ve proxy'lenir; allowlist dışına çıkmaz. (Faz 0 yalnızca dokümantasyon; davranış değiştirilmedi.)
+> Not: Transitous `plan`/`geocode`/`map/stops` istekleri kullanıcı konumu/koordinatlarını içerir ve proxy'lenir; allowlist dışına çıkmaz.
 
 ### 6.2 Proxy TTL tablosu (`server/proxyCore.getCacheTtlSeconds`, saniye)
 
@@ -280,12 +281,15 @@ assets-src/                  ikon kaynağı
 
 `npm install` → `npm run build` (`vite build`, `dist/`, `assets/`, `base:"./"`, sourcemap kapalı, esbuild, `outDir dist`). Dev `npm run dev` (5173 + `/api/proxy`→4173; `npm start` 4173 ile tam backend); `npm run preview`. Capacitor `npx cap sync android` + `gradlew`. `npm start` `server.js` 4173/`PORT`.
 
-### Test (`npm test` → `tests/verify-all.mjs`)
+### Test (`npm test`)
 
-1. Birim: `Zaman`, `Core`, `API.marmaray` (43 istasyon; `saatler`; `aktifTrenler`), `Plan.kur/ara`, Marmaray rota.
-2. Sunucu+proxy: `createServer`, `/`, `/manifest.webmanifest`, `/sw.js`, `/icons/icon-512.png`, `/health`, SSRF `403`, **canlı** `/api/proxy` İETT `GetDuyurular_json` `200`, Şehir Hatları `200`, İSPARK `200` (+`length>50`).
-3. Artefakt: `releases/Istanbul-Ulasim-v4.0-iOS-Scriptable.js` + `node --check`, `releases/Istanbul-Ulasim-v4.0-Android.apk` (>2MB, `PK`). [Faz 5 ilgili; bu görevde üretilmedi]
-   Ek: `tests/benchmark-and-verify.mjs`. **Ağ + mevcut `releases/` artefaktları gerekir; bu ortamda tam `npm test` iddia edilmez.**
+`npm test`, `pretest` ile web uygulamasını derler ve `tests/verify-all.mjs` betiğini çalıştırır. Varsayılan test internet bağlantısı gerektirmez.
+
+1. Birim testleri `Zaman`, `Core`, `API.marmaray` ve `Plan.kur/ara` bileşenlerini kapsar.
+2. Yerel sunucu ve proxy entegrasyon testleri statik dosya sunumunu, `/health` yanıtını ve SSRF `403` kontrolünü doğrular. İETT `GetDuyurular_json`, Şehir Hatları ve İSPARK için sabit yerel yanıtlar kullanılır. `npm test -- --live` bu üç kontrolü canlı servislerle yapar ve internet bağlantısı gerektirir.
+3. Betik `releases/Istanbul-Ulasim-v4.0-iOS-Scriptable.js` dosyasını `node --check` ile denetler. `releases/Istanbul-Ulasim-v4.0-Android.apk` varsa boyutu ve ZIP dosya başlığı doğrulanır. `npm test -- --require-apk` APK'nın bulunmasını zorunlu kılar. Artefakt adlarındaki `v4.0` tarihsel dosya adının parçasıdır.
+
+`node tests/benchmark-and-verify.mjs` ayrı performans ve ek kontrol betiğidir.
 
 ### Veri üretimi
 
@@ -312,17 +316,17 @@ Tek üretim hedefi **Cloudflare**; statik `dist/` + **Cloudflare Pages Function 
 
 **Faz 1 — kaldırılacak dağıtım hedefleri:**
 
-- **Render** `render.yaml` (+ `npm start`/`server.js` dağıtımı). 
+- **Render** `render.yaml` (+ `npm start`/`server.js` dağıtımı).
 - **Vercel** `vercel.json` + `api/proxy.js`.
 - **GitHub Pages** `.github/workflows/deploy-pages.yml`.
-- Sonuç: **Render, Vercel, GitHub Pages Faz 1'de kaldırılacak**; **hedef dağıtım yalnızca Cloudflare (`functions/api/proxy.js`)** kalacak. `server.js`, `server/*`, `worker.js`/`wrangler.jsonc` ele alınacak; **kod değişikliği Faz 0'da yapılmadı.**
+- Sonuç: **Render, Vercel, GitHub Pages Faz 1'de kaldırılacak**; **hedef dağıtım yalnızca Cloudflare (`functions/api/proxy.js`)** kalacak. `server.js`, `server/*`, `worker.js`/`wrangler.jsonc` ele alınacak.
 
 **Faz 5 — Scriptable/legacy kaldırılacak:**
 
-- `İstanbul Ulaşım.js`, `legacy/İstanbul Ulaşım.v3.8.js`, `scripts/build-scriptable.mjs`, `npm run build:scriptable`, `releases/`, `window.__SCRIPTABLE__` köprüsü, `src/core/storage.js` Scriptable/localStorage uyumu, `api.js` Scriptable yolları, `tests/verify-all.mjs` Scriptable artefakt kontrolü. **"Scriptable/legacy Faz 5'te kaldırılacak."** **kod değişikliği Faz 0'da yapılmadı.**
+- `İstanbul Ulaşım.js`, `legacy/İstanbul Ulaşım.v3.8.js`, `scripts/build-scriptable.mjs`, `npm run build:scriptable`, `releases/`, `window.__SCRIPTABLE__` köprüsü, `src/core/storage.js` Scriptable/localStorage uyumu, `api.js` Scriptable yolları, `tests/verify-all.mjs` Scriptable artefakt kontrolü.
 
 ---
 
 ## 13. Faz 0 kapsamı
 
-Bu görev **yalnızca dokümantasyon**: `README.md` + `docs/ARCHITECTURE.md`. **Kod değiştirilmedi; bağımlılık eklenmedi;** ayrı git worktree/dalda çalışıldı; **push/PR/merge yapılmadı.** Doğrulama: README'deki `npm` komutlarının `package.json scripts` ile eşleştiği kontrol edilir. (Paralel "Codex Faz 0 build" görevinin dosyalarına dokunulmadı.)
+Faz 0, uygulamanın `5.0.0` sürümünü, derleme ve test onarımını, `README.md` ve `docs/ARCHITECTURE.md` belgelerini bir araya getirir. Temiz kurulum `npm ci`, üretim derlemesi `npm run build` ve doğrulama `npm test` ile yapılır.

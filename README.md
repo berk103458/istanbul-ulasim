@@ -2,7 +2,7 @@
 
 İstanbul toplu taşıma için canlı, harita tabanlı uygulama: **Canlı Otobüs, Metrobüs, Metro, Marmaray, Vapur, İSPARK ve akıllı rota planlayıcı**. Tek sayfa uygulama (Vite), PWA ve **Capacitor Android** hedefli; veriler İBB/İETT, Metro İstanbul, Şehir Hatları, İBB trafik ve Transitous açık veri kaynaklarından **CORS-güvenli bir proxy** üzerinden çekilir, statik `public/data` yedeği ve tarayıcı önbelleğiyle çevrimdışı dayanıklılık sağlanır. Türkçe/İngilizce (i18n), karanlık tema.
 
-- Sürüm: `4.0.0` (`package.json`); bazı iç modüller kendi başlıklarında `v5.0` der. Uygulama kimliği `com.berk.istanbululasim`.
+- Uygulama sürümü `5.0.0` (`package.json`). Uygulama kimliği `com.berk.istanbululasim`.
 - Ek meta bilgi: `package.json`.
 
 > Bu belge Faz 0'da yazılmıştır; mimari ayrıntılar için bkz. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
@@ -65,7 +65,12 @@ npm start         # node server.js — statik + /api/* (port 4173, PORT env ile 
 npm test
 ```
 
-`node tests/verify-all.mjs`. Birim testleri (Zaman, geo `Core`, Marmaray, rota motoru `Plan`), **canlı ağ gerektiren proxy entegrasyon testleri** (İETT `GetDuyurular_json`, Şehir Hatları, İSPARK; SSRF allowlist 403 kontrolü; `/api/health`), ve sürüm artefaktı kontrolleri (`releases/Istanbul-Ulasim-v4.0-iOS-Scriptable.js`, `releases/Istanbul-Ulasim-v4.0-Android.apk`) çalışır. İzole/ağsız ortamda canlı proxy bölümü veya artefakt kontrolü başarısız olabilir. Ayrıca `node tests/benchmark-and-verify.mjs` performans/ek kontrol betiği mevcuttur (npm script'i yok).
+`npm test` önce `npm run build`, ardından `node tests/verify-all.mjs` çalıştırır. Birim testlerini (Zaman, geo `Core`, Marmaray, rota motoru `Plan`), yerel sunucu ve proxy kontrollerini (`/health` ve SSRF allowlist 403 dahil) ve sürüm artefaktı kontrollerini kapsar. İETT `GetDuyurular_json`, Şehir Hatları ve İSPARK için varsayılan test sabit yerel yanıtlar kullanır ve internet bağlantısı gerektirmez.
+
+- `npm test -- --live` İETT, Şehir Hatları ve İSPARK kontrollerini canlı servislerle çalıştırır ve internet bağlantısı gerektirir.
+- `npm test -- --require-apk` Android APK dosyasının bulunmasını zorunlu kılar. Varsayılan test APK'yı varsa doğrular, dosya yoksa ilgili kontrolü atlar. Depodaki `releases/Istanbul-Ulasim-v4.0-iOS-Scriptable.js` dosyası her çalıştırmada doğrulanır. Artefakt adlarındaki `v4.0` tarihsel dosya adının parçasıdır.
+
+`node tests/benchmark-and-verify.mjs` ayrı performans ve ek kontrol betiğidir.
 
 ### Yardımcı scriptler
 
@@ -108,7 +113,7 @@ cd android
 ./gradlew assembleRelease    # Windows PowerShell: .\gradlew.bat assembleRelease
 ```
 
-Çıktılar tipik olarak `android/app/build/outputs/apk/debug/app-debug.apk` ve `.../release/`. Konum izni `@capacitor/geolocation` ile istenir; `App.backButton` ve `StatusBar` köprüsü `src/main.js`/`src/core/bridge.js` içindedir. `npm test` içindeki APK kontrolü `releases/Istanbul-Ulasim-v4.0-Android.apk` yolunu bekler; `npx cap` üretimi `android/app/build/outputs/...` altındadır.
+Çıktılar tipik olarak `android/app/build/outputs/apk/debug/app-debug.apk` ve `.../release/`. Konum izni `@capacitor/geolocation` ile istenir; `App.backButton` ve `StatusBar` köprüsü `src/main.js`/`src/core/bridge.js` içindedir. `npm test -- --require-apk` APK'yı `releases/Istanbul-Ulasim-v4.0-Android.apk` yolunda arar.
 
 ---
 
