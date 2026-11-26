@@ -1,0 +1,53 @@
+{
+  "name": "İstanbul Ulaşım",
+  "short_name": "İst. Ulaşım",
+  "description": "Canlı İETT otobüs/metrobüs, Metro İstanbul, Marmaray, Şehir Hatları vapur, İSPARK ve akıllı rota planlayıcı",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "lang": "tr",
+  "background_color": "#0b1120",
+  "theme_color": "#0f62fe",
+  "categories": ["navigation", "travel", "utilities"],
+  "icons": [
+    {
+      "src": "./icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "./icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Yakınımda",
+      "short_name": "Yakınımda",
+      "url": "./?tab=yakin"
+    },
+    {
+      "name": "Rota Planla",
+      "short_name": "Rota",
+      "url": "./?tab=rota"
+    },
+    {
+      "name": "Otobüs & Metrobüs",
+      "short_name": "Otobüs",
+      "url": "./?tab=otobus"
+    },
+    {
+      "name": "Metro & Marmaray",
+      "short_name": "Raylı",
+      "url": "./?tab=rayli"
+    }
+  ]
+}

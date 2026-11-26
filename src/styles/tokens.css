@@ -1,0 +1,118 @@
+/* ==========================================================================
+   İstanbul Ulaşım v4.0 — Design Tokens (Light & Dark)
+   ========================================================================== */
+
+:root {
+  color-scheme: light;
+
+  /* Brand & Semantic Palette */
+  --vurgu: #0f62fe;
+  --vurgu-yumusak: rgba(15, 98, 254, 0.11);
+  --vurgu-yazi: #ffffff;
+
+  --iyi: #0d9448;
+  --iyi-yumusak: rgba(13, 148, 72, 0.12);
+  --uyari: #d97706;
+  --uyari-yumusak: rgba(217, 119, 6, 0.13);
+  --hata: #dc2626;
+  --hata-yumusak: rgba(220, 38, 38, 0.12);
+
+  /* Surfaces & Text */
+  --bg: #f3f5f8;
+  --kart: #ffffff;
+  --kart-2: #eef2f7;
+  --yazi: #111827;
+  --soluk: #5b6577;
+  --cizgi: rgba(15, 23, 42, 0.09);
+  --golge: 0 8px 28px rgba(15, 23, 42, 0.12);
+  --golge-hafif: 0 2px 10px rgba(15, 23, 42, 0.06);
+
+  /* Glassmorphism */
+  --cam-bg: rgba(255, 255, 255, 0.84);
+  --cam-cizgi: rgba(15, 23, 42, 0.08);
+  --backdrop: rgba(15, 23, 42, 0.44);
+
+  /* Transit Mode Colors */
+  --mod-otobus: #e67e22;
+  --mod-mb: #d9381e;
+  --mod-metro: #0f62fe;
+  --mod-marmaray: #1d4ed8;
+  --mod-tram: #0d9488;
+  --mod-vapur: #0284c7;
+  --mod-fun: #7c3aed;
+
+  /* Layout & Geometry */
+  --sekme: 62px;
+  --radius: 16px;
+  --radius-sm: 12px;
+  --radius-lg: 22px;
+  --tap: 44px;
+
+  /* Safe Areas */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+
+  /* Typography */
+  --font: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --ease-sheet: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --vurgu: #4d8eff;
+  --vurgu-yumusak: rgba(77, 142, 255, 0.18);
+  --vurgu-yazi: #0b111c;
+
+  --iyi: #34d399;
+  --iyi-yumusak: rgba(52, 211, 153, 0.16);
+  --uyari: #fbbf24;
+  --uyari-yumusak: rgba(251, 191, 36, 0.16);
+  --hata: #f87171;
+  --hata-yumusak: rgba(248, 113, 113, 0.16);
+
+  --bg: #0c1017;
+  --kart: #151b24;
+  --kart-2: #1d2532;
+  --yazi: #f3f6fc;
+  --soluk: #9aa6ba;
+  --cizgi: rgba(255, 255, 255, 0.09);
+  --golge: 0 12px 32px rgba(0, 0, 0, 0.55);
+  --golge-hafif: 0 2px 12px rgba(0, 0, 0, 0.32);
+
+  --cam-bg: rgba(22, 27, 36, 0.84);
+  --cam-cizgi: rgba(255, 255, 255, 0.11);
+  --backdrop: rgba(0, 0, 0, 0.64);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --vurgu: #4d8eff;
+    --vurgu-yumusak: rgba(77, 142, 255, 0.18);
+    --vurgu-yazi: #0b111c;
+
+    --iyi: #34d399;
+    --iyi-yumusak: rgba(52, 211, 153, 0.16);
+    --uyari: #fbbf24;
+    --uyari-yumusak: rgba(251, 191, 36, 0.16);
+    --hata: #f87171;
+    --hata-yumusak: rgba(248, 113, 113, 0.16);
+
+    --bg: #0c1017;
+    --kart: #151b24;
+    --kart-2: #1d2532;
+    --yazi: #f3f6fc;
+    --soluk: #9aa6ba;
+    --cizgi: rgba(255, 255, 255, 0.09);
+    --golge: 0 12px 32px rgba(0, 0, 0, 0.55);
+    --golge-hafif: 0 2px 12px rgba(0, 0, 0, 0.32);
+
+    --cam-bg: rgba(22, 27, 36, 0.84);
+    --cam-cizgi: rgba(255, 255, 255, 0.11);
+    --backdrop: rgba(0, 0, 0, 0.64);
+  }
+}

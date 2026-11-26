@@ -1,0 +1,369 @@
+/* ==========================================================================
+   İstanbul Ulaşım v4.0 — App Shell, Map, Draggable Sheet, Bottom Nav & Modal
+   ========================================================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.45;
+  background: var(--bg);
+  color: var(--yazi);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  user-select: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+  color: inherit;
+}
+
+/* Tabular numbers for all times, ETAs, distances, counts */
+time,
+.sure,
+.eta,
+.mesafe,
+.sayac,
+table.tarife td,
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------- Map Container ---------------- */
+#harita {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 44vh;
+  z-index: 1;
+  background: var(--kart-2);
+  transition: height 0.28s var(--ease-sheet);
+}
+
+body.genis #harita {
+  height: 14vh;
+}
+
+body.harita-buyuk #harita {
+  height: 72vh;
+}
+
+body.tam #harita {
+  height: 100vh;
+}
+
+/* ---------------- Floating Map Controls (Glassmorphism) ---------------- */
+.harita-ust-sol {
+  position: fixed;
+  top: calc(12px + var(--safe-top));
+  left: calc(12px + var(--safe-left));
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: calc(100vw - 84px);
+  pointer-events: none;
+}
+
+#trafikBilgi,
+#isparkBilgi {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 13px;
+  border-radius: 999px;
+  background: var(--cam-bg);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--cam-cizgi);
+  box-shadow: var(--golge-hafif);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--yazi);
+  line-height: 1.2;
+}
+
+#trafikBilgi:empty,
+#isparkBilgi:empty {
+  display: none;
+}
+
+.harita-ust-sag {
+  position: fixed;
+  top: calc(12px + var(--safe-top));
+  right: calc(12px + var(--safe-right));
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.harita-ust-sag button {
+  width: var(--tap);
+  height: var(--tap);
+  min-width: var(--tap);
+  min-height: var(--tap);
+  border-radius: 14px;
+  border: 1px solid var(--cam-cizgi);
+  background: var(--cam-bg);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  box-shadow: var(--golge-hafif);
+  color: var(--yazi);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.15s ease, background-color 0.18s ease, color 0.18s ease, border-color 0.18s ease;
+}
+
+.harita-ust-sag button:active {
+  transform: scale(0.93);
+}
+
+.harita-ust-sag button.aktif {
+  background: var(--vurgu);
+  color: var(--vurgu-yazi);
+  border-color: transparent;
+}
+
+/* Map Point Picker Banner */
+#secimBandi {
+  position: fixed;
+  top: calc(14px + var(--safe-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: none;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 8px 16px;
+  border-radius: 999px;
+  background: var(--cam-bg);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid var(--cam-cizgi);
+  box-shadow: var(--golge);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+#secimBandi.acik {
+  display: flex;
+}
+
+/* ---------------- Draggable Bottom Sheet (#panel) ---------------- */
+#panel {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 41vh;
+  bottom: calc(var(--sekme) + var(--safe-bottom));
+  z-index: 15;
+  background: var(--bg);
+  border-top-left-radius: var(--radius-lg);
+  border-top-right-radius: var(--radius-lg);
+  border-top: 1px solid var(--cizgi);
+  box-shadow: 0 -8px 30px rgba(15, 23, 42, 0.14);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: top 0.28s var(--ease-sheet);
+}
+
+#panel.suruk {
+  transition: none;
+}
+
+body.genis #panel {
+  top: 12vh;
+}
+
+body.harita-buyuk #panel {
+  top: 69vh;
+}
+
+body.tam #panel {
+  top: calc(100vh - var(--sekme) - var(--safe-bottom) - 44px);
+}
+
+#tutamak {
+  flex: 0 0 auto;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+#tutamak:active {
+  cursor: grabbing;
+}
+
+#tutamak span {
+  width: 38px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--soluk);
+  opacity: 0.34;
+}
+
+#icerik {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  padding: 2px calc(14px + var(--safe-right)) 24px calc(14px + var(--safe-left));
+  user-select: text;
+}
+
+/* ---------------- Bottom Tab Navigation ---------------- */
+nav#sekmeler {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: calc(var(--sekme) + var(--safe-bottom));
+  padding: 4px var(--safe-right) var(--safe-bottom) var(--safe-left);
+  z-index: 40;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  align-items: center;
+  background: var(--cam-bg);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border-top: 1px solid var(--cizgi);
+}
+
+nav#sekmeler button {
+  min-height: 48px;
+  padding: 2px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--soluk);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  transition: color 0.18s ease;
+}
+
+nav#sekmeler button .nav-ikon {
+  width: 48px;
+  height: 28px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.18s ease, transform 0.16s ease;
+}
+
+nav#sekmeler button.aktif {
+  color: var(--vurgu);
+}
+
+nav#sekmeler button.aktif .nav-ikon {
+  background: var(--vurgu-yumusak);
+}
+
+nav#sekmeler button:active .nav-ikon {
+  transform: scale(0.92);
+}
+
+/* ---------------- Slide-up Bottom Modal Sheet ---------------- */
+.alt-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: var(--backdrop);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  animation: modalFadeIn 0.2s ease;
+}
+
+.alt-modal[hidden] {
+  display: none;
+}
+
+.alt-modal-kutu {
+  width: 100%;
+  max-width: 560px;
+  max-height: 84vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  background: var(--bg);
+  color: var(--yazi);
+  border-top-left-radius: var(--radius-lg);
+  border-top-right-radius: var(--radius-lg);
+  border-top: 1px solid var(--cizgi);
+  box-shadow: var(--golge);
+  padding: 14px 16px calc(20px + var(--safe-bottom));
+  animation: modalSlideUp 0.26s var(--ease-sheet);
+  user-select: text;
+}
+
+@keyframes modalFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes modalSlideUp {
+  from {
+    transform: translateY(36px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Subtle scrollbar on desktop */
+#icerik::-webkit-scrollbar,
+.alt-modal-kutu::-webkit-scrollbar {
+  width: 4px;
+}
+
+#icerik::-webkit-scrollbar-thumb,
+.alt-modal-kutu::-webkit-scrollbar-thumb {
+  background: var(--cizgi);
+  border-radius: 999px;
+}

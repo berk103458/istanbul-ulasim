@@ -1,0 +1,13 @@
+{
+  "appId": "com.berk.istanbululasim",
+  "appName": "İstanbul Ulaşım",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": false
+    }
+  }
+}

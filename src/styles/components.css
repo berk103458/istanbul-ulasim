@@ -1,0 +1,791 @@
+/* ==========================================================================
+   İstanbul Ulaşım v4.0 — UI Components & Transit Primitives
+   ========================================================================== */
+
+/* ---------------- Interactive Press Feedback ---------------- */
+.tik {
+  cursor: pointer;
+  transition: transform 0.14s ease, background-color 0.16s ease, border-color 0.16s ease;
+}
+
+.tik:active {
+  transform: scale(0.985);
+}
+
+/* ---------------- Buttons ---------------- */
+.btn {
+  min-height: var(--tap);
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--cizgi);
+  background: var(--kart);
+  color: var(--yazi);
+  font-size: 14px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: transform 0.14s ease, background-color 0.16s ease, opacity 0.16s ease;
+}
+
+.btn:active {
+  transform: scale(0.97);
+}
+
+.btn:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+.btn.birincil {
+  background: var(--vurgu);
+  color: var(--vurgu-yazi);
+  border-color: transparent;
+}
+
+.btn.hayalet {
+  background: transparent;
+  border-color: transparent;
+  color: var(--vurgu);
+}
+
+.btn.kucuk {
+  min-height: 36px;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  border-radius: 999px;
+}
+
+.btn.ikon {
+  width: var(--tap);
+  height: var(--tap);
+  min-width: var(--tap);
+  padding: 0;
+  border-radius: 12px;
+}
+
+/* ---------------- Section Headers ---------------- */
+.baslik-satir {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 14px 2px 8px;
+}
+
+.baslik-satir h2,
+.baslik-satir h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+}
+
+.baslik-satir .soluk {
+  font-size: 12.5px;
+  color: var(--soluk);
+  font-weight: 500;
+}
+
+/* ---------------- Cards & Lists ---------------- */
+.liste {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.kart {
+  background: var(--kart);
+  border: 1px solid var(--cizgi);
+  border-radius: var(--radius);
+  padding: 13px 14px;
+  box-shadow: var(--golge-hafif);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.kart.satir {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 60px;
+}
+
+.kart-sol {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.kart-sag {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bas {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--yazi);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.alt {
+  font-size: 12.5px;
+  color: var(--soluk);
+  line-height: 1.38;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.bos {
+  text-align: center;
+  padding: 28px 16px;
+  color: var(--soluk);
+  font-size: 13.5px;
+  background: var(--kart);
+  border: 1px dashed var(--cizgi);
+  border-radius: var(--radius);
+}
+
+/* ---------------- Transit Badges (.rozet) ---------------- */
+.rozet {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 34px;
+  padding: 3px 9px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  line-height: 1.25;
+  color: #ffffff;
+  background: var(--vurgu);
+  white-space: nowrap;
+}
+
+.rozet.otobus { background: var(--mod-otobus); }
+.rozet.mb { background: var(--mod-mb); }
+.rozet.metro { background: var(--mod-metro); }
+.rozet.marmaray { background: var(--mod-marmaray); }
+.rozet.tram { background: var(--mod-tram); }
+.rozet.vapur { background: var(--mod-vapur); }
+.rozet.fun { background: var(--mod-fun); }
+.rozet.soluk {
+  background: var(--kart-2);
+  color: var(--soluk);
+  font-weight: 700;
+}
+
+/* ---------------- ETA & Live Pills ---------------- */
+.sure {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  background: var(--vurgu-yumusak);
+  color: var(--vurgu);
+  white-space: nowrap;
+}
+
+.sure.yakin {
+  background: var(--iyi-yumusak);
+  color: var(--iyi);
+}
+
+.sure.tarife {
+  background: var(--kart-2);
+  color: var(--soluk);
+  font-weight: 600;
+}
+
+.canli {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--iyi-yumusak);
+  color: var(--iyi);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.canli::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: canliPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes canliPulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.75);
+  }
+}
+
+/* ---------------- Segmented Control ---------------- */
+.segment {
+  display: flex;
+  padding: 4px;
+  border-radius: 14px;
+  background: var(--kart-2);
+  border: 1px solid var(--cizgi);
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.segment button {
+  flex: 1 1 0;
+  min-height: 38px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--soluk);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: background-color 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.segment button.aktif {
+  background: var(--kart);
+  color: var(--yazi);
+  box-shadow: var(--golge-hafif);
+}
+
+/* ---------------- Filter Chips & Quick Places ---------------- */
+.cip-satir,
+.hizli-yerler {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  padding: 2px 0 10px;
+  margin: 0 -2px;
+}
+
+.cip-satir::-webkit-scrollbar,
+.hizli-yerler::-webkit-scrollbar {
+  display: none;
+}
+
+.cip {
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--cizgi);
+  background: var(--kart);
+  color: var(--yazi);
+  font-size: 13px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.16s ease, color 0.16s ease, border-color 0.16s ease, transform 0.12s ease;
+}
+
+.cip:active {
+  transform: scale(0.96);
+}
+
+.cip.aktif {
+  background: var(--vurgu);
+  color: var(--vurgu-yazi);
+  border-color: transparent;
+}
+
+/* ---------------- Search Input & Autocomplete ---------------- */
+.arama-kutu {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.arama-kutu .arama-ikon {
+  position: absolute;
+  left: 14px;
+  color: var(--soluk);
+  pointer-events: none;
+  display: inline-flex;
+}
+
+input.giris {
+  width: 100%;
+  min-height: var(--tap);
+  padding: 10px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--cizgi);
+  background: var(--kart);
+  color: var(--yazi);
+  font-size: 15px;
+  font-weight: 500;
+  outline: none;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.arama-kutu input.giris {
+  padding-left: 40px;
+}
+
+input.giris:focus {
+  border-color: var(--vurgu);
+  box-shadow: 0 0 0 3px var(--vurgu-yumusak);
+}
+
+input.giris::placeholder {
+  color: var(--soluk);
+}
+
+.oneriler {
+  background: var(--kart);
+  border: 1px solid var(--cizgi);
+  border-radius: var(--radius);
+  box-shadow: var(--golge);
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.oneri-satir {
+  width: 100%;
+  min-height: var(--tap);
+  padding: 10px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--cizgi);
+  background: transparent;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.oneri-satir:last-child {
+  border-bottom: 0;
+}
+
+.oneri-satir:active {
+  background: var(--kart-2);
+}
+
+/* ---------------- Route Planner (.rota-ust, .yer-giris, .zincir, .bacak) ---------------- */
+.rota-ust {
+  background: var(--kart);
+  border: 1px solid var(--cizgi);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  box-shadow: var(--golge-hafif);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+  position: relative;
+}
+
+.yer-giris {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--tap);
+  padding: 4px 8px;
+  border-radius: 12px;
+  background: var(--kart-2);
+}
+
+.yer-giris .nokta {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--iyi);
+}
+
+.yer-giris.varis .nokta {
+  background: var(--hata);
+}
+
+.yer-giris input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  outline: none;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--yazi);
+}
+
+.yer-giris input::placeholder {
+  color: var(--soluk);
+  font-weight: 500;
+}
+
+.yer-giris button {
+  min-width: 36px;
+  min-height: 36px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--soluk);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.yer-giris button:active {
+  background: var(--cizgi);
+}
+
+.zincir {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.zincir .ok {
+  color: var(--soluk);
+  font-size: 12px;
+}
+
+/* Route Leg Timeline */
+.bacak {
+  position: relative;
+  padding: 10px 0 10px 22px;
+  border-left: 3px solid var(--vurgu);
+  margin-left: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.bacak::before {
+  content: "";
+  position: absolute;
+  left: -7px;
+  top: 13px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--kart);
+  border: 3px solid var(--vurgu);
+}
+
+.bacak.yuruyus {
+  border-left-style: dashed;
+  border-left-color: var(--soluk);
+}
+
+.bacak.yuruyus::before {
+  border-color: var(--soluk);
+}
+
+/* ---------------- Alert Banner (.duyuru) ---------------- */
+.duyuru {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 13px;
+  border-radius: var(--radius-sm);
+  background: var(--uyari-yumusak);
+  color: var(--yazi);
+  border: 1px solid color-mix(in srgb, var(--uyari) 30%, transparent);
+  font-size: 13px;
+  line-height: 1.4;
+  margin-bottom: 10px;
+}
+
+.duyuru .duyuru-ikon {
+  color: var(--uyari);
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.duyuru.hata {
+  background: var(--hata-yumusak);
+  border-color: color-mix(in srgb, var(--hata) 30%, transparent);
+}
+
+.duyuru.hata .duyuru-ikon {
+  color: var(--hata);
+}
+
+.duyuru.bilgi {
+  background: var(--vurgu-yumusak);
+  border-color: color-mix(in srgb, var(--vurgu) 30%, transparent);
+}
+
+.duyuru.bilgi .duyuru-ikon {
+  color: var(--vurgu);
+}
+
+/* ---------------- Skeleton Loading Placeholders ---------------- */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--kart-2);
+  border-radius: 10px;
+}
+
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.35),
+    transparent
+  );
+  animation: shimmer 1.3s infinite;
+}
+
+[data-theme="dark"] .skeleton::after {
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.08),
+    transparent
+  );
+}
+
+.skeleton-kart {
+  height: 70px;
+  border-radius: var(--radius);
+  margin-bottom: 10px;
+}
+
+.skeleton-satir {
+  height: 16px;
+  width: 70%;
+  margin-bottom: 8px;
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* ---------------- Vertical Transit Stop List (ol.duraklar) ---------------- */
+ol.duraklar {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0 0 0 18px;
+  position: relative;
+}
+
+ol.duraklar::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  top: 12px;
+  bottom: 12px;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--vurgu);
+  opacity: 0.35;
+}
+
+ol.duraklar li {
+  position: relative;
+  padding: 9px 10px 9px 18px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 44px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+ol.duraklar li::before {
+  content: "";
+  position: absolute;
+  left: -16px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--kart);
+  border: 2.5px solid var(--vurgu);
+  z-index: 1;
+}
+
+ol.duraklar li.aktif {
+  background: var(--vurgu-yumusak);
+  font-weight: 700;
+}
+
+ol.duraklar li.aktif::before {
+  background: var(--vurgu);
+  transform: translateY(-50%) scale(1.18);
+}
+
+.arac-cip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--iyi);
+  color: #ffffff;
+  font-size: 11.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  box-shadow: var(--golge-hafif);
+  white-space: nowrap;
+}
+
+/* ---------------- Timetable Table (table.tarife) ---------------- */
+table.tarife {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--kart);
+  border: 1px solid var(--cizgi);
+  border-radius: var(--radius);
+  overflow: hidden;
+  font-size: 13.5px;
+}
+
+table.tarife th,
+table.tarife td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--cizgi);
+  font-variant-numeric: tabular-nums;
+}
+
+table.tarife th {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--soluk);
+  background: var(--kart-2);
+}
+
+table.tarife tr:last-child td {
+  border-bottom: 0;
+}
+
+table.tarife tr.siradaki td {
+  background: var(--vurgu-yumusak);
+  color: var(--vurgu);
+  font-weight: 700;
+}
+
+/* ---------------- Settings Rows (.ayar-satir) ---------------- */
+.ayar-satir {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 54px;
+  padding: 12px 14px;
+  background: var(--kart);
+  border: 1px solid var(--cizgi);
+  border-radius: var(--radius);
+  margin-bottom: 10px;
+}
+
+.ayar-satir .ayar-bilgi {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ayar-satir .ayar-baslik {
+  font-size: 14.5px;
+  font-weight: 600;
+}
+
+.ayar-satir .ayar-alt {
+  font-size: 12px;
+  color: var(--soluk);
+}
+
+/* Modal Header */
+.modal-baslik {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--cizgi);
+}
+
+.modal-baslik h2,
+.modal-baslik h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.doluluk-bar {
+  height: 8px;
+  width: 100%;
+  border-radius: 999px;
+  background: var(--kart-2);
+  overflow: hidden;
+  margin-top: 6px;
+}
+
+.doluluk-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--iyi);
+  transition: width 0.3s ease;
+}
