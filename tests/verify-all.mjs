@@ -17,7 +17,7 @@ const requireApk = process.argv.includes("--require-apk");
 // Run the integration suite with the in-memory cache and without browser storage.
 delete process.env.REDIS_URL;
 delete globalThis.localStorage;
-const { createServer } = await import("../server.js");
+const { createServer } = await import("../server/localServer.js");
 const { API } = await import("../src/core/api.js");
 const { Plan } = await import("../src/core/router.js");
 

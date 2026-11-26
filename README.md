@@ -5,7 +5,7 @@
 - Uygulama sürümü `5.0.0` (`package.json`). Uygulama kimliği `com.berk.istanbululasim`.
 - Ek meta bilgi: `package.json`.
 
-> Bu belge Faz 0'da yazılmıştır; mimari ayrıntılar için bkz. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+> Mimari ayrıntılar için bkz. [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 
@@ -15,7 +15,7 @@
 - Metro, tramvay, funiküler, teleferik, Marmaray ve vapur sefer saatleri; Marmaray seferleri yerel statik istasyon listesinden sentezlenir.
 - İSPARK otopark kapasite/boşluk bilgisi; TKM trafik yoğunluğu katmanı; harita katmanları.
 - Akıllı rota planlayıcı: çok bacaklı A* (otobüs + metrobüs + raylı + vapur + yürüme, aktarmalı), Web Worker'da hesaplanır; opsiyonel Google Routes/Places entegrasyonu (sunucu tarafı).
-- Bildirim motoru (ETA eşiği), canlı güncelleme döngüsü, SSE akışı (tam sunucuda), çevrimdışı önbellek + statik veri fallback'i, PWA service worker.
+- Bildirim motoru (ETA eşiği), canlı güncelleme döngüsü, yerel sunucuda SSE, çevrimdışı önbellek + statik veri fallback'i, PWA service worker.
 
 ---
 
@@ -23,17 +23,15 @@
 
 ### Gereksinimler
 
-- **Node.js 18+** (CI'de Node 22; bu depoda geliştirme Node 26 ile doğrulandı). `package.json` `"type": "module"`.
+- **Node.js 20.10+ (20.x) veya 22+**. Aşağıdaki Wrangler komutları için **22.12+** gerekir.
 - **npm**. Windows PowerShell'de `npm`, yürütme ilkesiyle engellenirse `npm.cmd` kullanın (örn. `npm.cmd run build`).
 - Android derlemesi için ek: **JDK 17**, **Android SDK**, (opsiyonel) **Android Studio**. `@capacitor/android` ve `@capacitor/cli` `devDependencies` içindedir; harici `cap` kurulumu gerekmez.
 
 ### 1) Bağımlılıkları kur
 
 ```sh
-npm install
+npm ci
 ```
-
-Yeni bağımlılık eklenmemiştir; kilit dosyası `package-lock.json`.
 
 ### 2) Geliştirme sunucusu
 
@@ -41,7 +39,7 @@ Yeni bağımlılık eklenmemiştir; kilit dosyası `package-lock.json`.
 npm run dev
 ```
 
-`vite` çalışır; varsayılan adres **http://localhost:5173** (`vite.config.js`, `base: "./"`). `/api/proxy` istekleri `http://localhost:4173` adresine proxy'lenir; tam proxy deneyimi için ikinci bir terminalde `npm start` (port **4173**) çalıştırın. Backend/proxy yoksa uygulama `public/data` statik verisine ve canlı doğrudan CORS host'larına düşer.
+Vite varsayılan olarak **http://localhost:5173** adresinde çalışır ve `/api/proxy` isteklerini **http://127.0.0.1:4173** adresine iletir. Proxy için ikinci bir terminalde `npm start` çalıştırın. Proxyye ulaşılamadığında uygulama `public/data` statik verisini ve doğrudan CORS erişimi sağlayan canlı kaynakları kullanır.
 
 ### 3) Üretim derlemesi
 
@@ -56,7 +54,7 @@ Derlemeyi yerel sunucuyla servis etmek için:
 ```sh
 npm run preview   # vite preview
 # veya
-npm start         # node server.js — statik + /api/* (port 4173, PORT env ile değiştirilebilir)
+npm start         # yerel Node sunucusu — statik dosyalar ve API (127.0.0.1:4173, port için PORT)
 ```
 
 ### 4) Test
@@ -97,7 +95,7 @@ Native proje **`android/`** dizinindedir (`namespace`/`applicationId` `com.berk.
 ### Adımlar
 
 ```sh
-npm install
+npm ci
 npm run build          # web derlemesi -> dist/
 npx cap sync android   # dist/ + plugin'leri android/ içine kopyala
 npx cap open android   # Android Studio'da aç; oradan APK/AAB üret
@@ -123,11 +121,11 @@ cd android
 .
 ├── README.md                     # bu belge
 ├── docs/
-│   └── ARCHITECTURE.md           # mimari ayrıntılar (Faz 0)
+│   └── ARCHITECTURE.md           # mimari ayrıntılar
 ├── index.html                    # giriş sayfası (Vite kökü)
 ├── capacitor.config.json         # Capacitor 6 konfigürasyonu
-├── vite.config.js                # Vite 5; base "./", /api/proxy dev proxy, dist çıktısı
-├── package.json                  # scripts + bağımlılıklar (bağımlılık eklenmedi)
+├── vite.config.js                # Vite 6, /api/proxy dev yönlendirmesi, dist çıktısı
+├── package.json                  # scriptler ve bağımlılıklar
 │
 ├── src/                          # uygulama kaynağı (ES modules)
 │   ├── main.js                   # önyükleme, yönlendirme (S.yigin), olaylar, periyodik canlı döngüler, PWA
@@ -176,20 +174,17 @@ cd android
 │   └── build-scriptable.mjs      # npm run build:scriptable (Faz 5'te kaldırılacak)
 │
 ├── functions/
-│   └── api/proxy.js              # Cloudflare Pages Function proxy (hedef dağıtım; onRequest)
+│   └── api/proxy.js              # Cloudflare Pages Function adapter'ı
 ├── server/                       # paylaşılan sunucu çekirdeği
 │   ├── proxyCore.js              # SSRF allowlist, cache TTL, circuit breaker, coalescing, fetch
 │   ├── cacheLayer.js             # iki katmanlı cache + Redis fallback
 │   ├── apiGateway.js             # rate limit, circuit breaker, metrics, provider tespiti
-│   ├── sseHub.js                 # SSE + filo bbox (tam Node sunucusu)
-│   └── googleMapsProxy.js        # Google Routes/Places/Geocode proxy (opsiyonel anahtar)
+│   ├── sseHub.js                 # SSE + filo bbox (yerel Node sunucusu)
+│   ├── googleMapsProxy.js        # Google Routes/Places/Geocode proxy (yerel)
+│   └── localServer.js           # geliştirme ve test sunucusu (npm start)
 │
-├── server.js                     # tam Node sunucusu (statik + /api/*; Render hedefi — Faz 1'de kaldırılacak)
-├── api/proxy.js                  # Vercel serverless proxy (Faz 1'de kaldırılacak)
-├── worker.js + wrangler.jsonc    # bağımsız Cloudflare Worker varyantı
-├── render.yaml                   # Render (Faz 1'de kaldırılacak)
-├── vercel.json                   # Vercel (Faz 1'de kaldırılacak)
-├── .github/workflows/deploy-pages.yml  # GitHub Pages (Faz 1'de kaldırılacak)
+├── worker.js + wrangler.worker.jsonc # Cloudflare Worker ve statik dosyalar
+├── wrangler.jsonc               # Cloudflare Pages yapılandırması
 │
 ├── android/                      # Capacitor native Android projesi
 ├── İstanbul Ulaşım.js            # Scriptable v3.8 tek dosya uygulaması (Faz 5'te kaldırılacak)
@@ -229,24 +224,27 @@ Canlı kaynak başarısız olursa `src/core/api.js` `fetchStaticJson()` ile `./d
 6. **Rota**: `Plan` grafiği `src/workers/router.worker.js` Web Worker'ında `INIT_GRAPH` ile kurulur; istekler worker'a mesajla gider. Transitous itinerary'leri ile birleştirilir.
 7. **Kalıcılık**: `KV` IndexedDB `istanbul-ulasim-v4`, `localStorage`/`ulasim.proxyUrl`, PWA `sw.js`. Veri hiçbir kişisel sunucuda saklanmaz.
 
-### Tam Node sunucusu vs Cloudflare
+## Cloudflare dağıtımı
 
-`npm start` (`server.js`) statik `dist/` servis eder + `/api/proxy`, `/api/stream` (SSE), `/api/fleet`, `/api/health`, `/api/metrics`, Google `/api/google/*` ekler; rate limit + gzip. Bağımsız Cloudflare Worker `worker.js` (`wrangler.jsonc`, `/api/proxy` + `/health` + ASSETS). **Karar:** hedef dağıtım **yalnızca Cloudflare**; `functions/api/proxy.js` **tek** proxy olacak.
+Üretim için `npm ci` ve `npm run build` çalıştırın. Cloudflare Pages, `dist/` ve `functions/api/proxy.js` dosyasını kullanır. Cloudflare Workers, `worker.js` ile `/api/proxy` ve `/health` yollarını karşılar ve `dist/` dosyalarını `ASSETS` üzerinden sunar. İki adapter da `server/proxyCore.js` çekirdeğini çağırır.
+
+```sh
+# Pages'i yerel olarak önizle
+npx wrangler@4.168.0 pages dev
+
+# Workers'ı yerel olarak önizle
+npx wrangler@4.168.0 dev --config wrangler.worker.jsonc
+```
+
+Yayın sırasında Pages için `npx wrangler@4.168.0 pages deploy`, Workers için `npx wrangler@4.168.0 deploy --config wrangler.worker.jsonc` kullanılır. Git bağlantılı Pages projesinde derleme komutu `npm run build`, çıktı dizini `dist` olmalıdır. Her iki Wrangler yapılandırması da çekirdeğin Node.js API'leri için `2025-11-01` uyumluluk tarihini ve `nodejs_compat` bayrağını kullanır.
+
+SSE, filo, metrikler ve Google Maps uçları `npm start` ile açılan yerel Node sunucusunda kullanılabilir.
 
 ---
 
-## Kararlar ve planlanan değişiklikler
+## Planlanan değişiklikler
 
-**Karar — hedef dağıtım yalnızca Cloudflare.** Uygulama statik `dist/` + **Cloudflare Pages Function `functions/api/proxy.js`** (`onRequest`) olarak dağıtılır; proxy çekirdeği `server/proxyCore.js` paylaşılır. Başka dağıtım hedefi hedeflenmez.
-
-**Planlanan değişiklikler (henüz uygulanmadı; yalnızca dokümantasyon notu):**
-
-- **Faz 1:** Render, Vercel ve GitHub Pages hedefleri **kaldırılacak**:
-  - Render → `render.yaml`, `npm start`/`server.js` dağıtımı;
-  - Vercel → `vercel.json`, `api/proxy.js` serverless fonksiyonu;
-  - GitHub Pages → `.github/workflows/deploy-pages.yml`.
-  Tek dağıtım yolu Cloudflare (`functions/api/proxy.js`) kalacak. (Bu değişiklikler bu görevde **kod olarak yapılmadı**.)
-- **Faz 5:** **Scriptable/legacy kaldırılacak** → `İstanbul Ulaşım.js`, `legacy/`, `scripts/build-scriptable.mjs`, `npm run build:scriptable`, `releases/`, `window.__SCRIPTABLE__` köprü dalı (`src/core/bridge.js`, `src/core/storage.js`, `api.js` Scriptable yolları), `tests/verify-all.mjs` Scriptable artefakt kontrolü. (Bu değişiklikler bu görevde **kod olarak yapılmadı**.)
+- **Faz 5:** Scriptable kaynakları, derleme komutu, yerel köprü ve artefakt testleri kaldırılacak.
 
 ---
 

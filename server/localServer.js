@@ -4,21 +4,21 @@ import path from "node:path";
 import zlib from "node:zlib";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { handleProxyRequest, CORS_HEADERS } from "./server/proxyCore.js";
-import { sharedCache } from "./server/cacheLayer.js";
-import { gateway } from "./server/apiGateway.js";
-import { handleSseConnection, getFleetInBbox } from "./server/sseHub.js";
+import { handleProxyRequest, CORS_HEADERS } from "./proxyCore.js";
+import { sharedCache } from "./cacheLayer.js";
+import { gateway } from "./apiGateway.js";
+import { handleSseConnection, getFleetInBbox } from "./sseHub.js";
 import {
   isGoogleMapsConfigured,
   handleGoogleRoutes,
   handleGooglePlaces,
   handleGoogleGeocode,
-} from "./server/googleMapsProxy.js";
+} from "./googleMapsProxy.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const { version } = createRequire(import.meta.url)("./package.json");
-const DIST_DIR = path.join(__dirname, "dist");
-const PUBLIC_DIR = path.join(__dirname, "public");
+const root = fileURLToPath(new URL("../", import.meta.url));
+const { version } = createRequire(import.meta.url)("../package.json");
+const DIST_DIR = path.join(root, "dist");
+const PUBLIC_DIR = path.join(root, "public");
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -227,7 +227,7 @@ export function createServer() {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.PORT) || 4173;
   const server = createServer();
-  server.listen(port, "0.0.0.0", () => {
-    console.log(`Istanbul Ulasim v${version} server listening on http://localhost:${port}`);
+  server.listen(port, "127.0.0.1", () => {
+    console.log(`Istanbul Ulasim v${version} local server listening on http://127.0.0.1:${port}`);
   });
 }

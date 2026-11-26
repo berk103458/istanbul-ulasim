@@ -1,6 +1,6 @@
 # Mimari — İstanbul Ulaşım
 
-> Faz 0 mimarisi. Uygulama sürümü `5.0.0` ve `package.json` dosyasında tanımlıdır. Tam Node sunucusunun `/api/health` ucu uygulama sürümünü raporlar.
+> Faz 1 mimarisi. Uygulama sürümü `package.json` dosyasında tanımlıdır. Worker ve yerel Node sunucusu sürümü `/health` ucunda raporlar.
 
 ---
 
@@ -57,10 +57,9 @@ Ek katmanlar: katmanlı önbellek (bellek + IndexedDB + service worker + statik 
 └─────────────────────────────────────────────────────────────────────┘
 
 Proxy'yi sunan adapter'lar (aynı çekirdek, server/proxyCore.js):
-  • functions/api/proxy.js   — Cloudflare Pages Function  [HEDEF]
-  • server.js (/api/proxy)   — tam Node sunucusu          [Faz 1'de kaldırılacak]
-  • worker.js (/api/proxy)   — bağımsız Cloudflare Worker [hedef dışı varyant]
-  • api/proxy.js             — Vercel serverless          [Faz 1'de kaldırılacak]
+  • functions/api/proxy.js   — Cloudflare Pages Function
+  • worker.js (/api/proxy)   — Cloudflare Worker
+  • server/localServer.js   — yerel geliştirme ve test
 
 Rota motoru ayrı iş parçacığında:
   src/workers/router.worker.js ── INIT_GRAPH / rota mesajları ──► src/core/router.js (Plan)
@@ -79,17 +78,15 @@ Rota motoru ayrı iş parçacığında:
 | **web** | varsayılan | `isDirectCorsHost` → doğrudan; aksi `./api/proxy` veya `customProxyBase/api/proxy`; `404/405` → `proxyMissing` + statik fallback | PWA + service worker |
 | **capacitor** | `window.Capacitor.isNativePlatform()` | `CapacitorHttp.request` (UA, 20/25 sn timeout); hata + `customProxyBase` → `/api/proxy` | Android; `CapacitorHttp.enabled:false`; konum `@capacitor/geolocation`; `App.backButton` |
 | **scriptable** | `window.__SCRIPTABLE__` | `__bridgeCall("http"...)`, `__bridgeTake/__bridgeDeliver`, `__bridgeCall("location"/"open")` | **Faz 5'te kaldırılacak** |
-| **node** | `typeof window === "undefined"` | doğrudan `fetch`, UA `IstanbulUlasim/5.0` | testler, `server.js`, build scriptleri |
+| **node** | `typeof window === "undefined"` | doğrudan `fetch`, UA `IstanbulUlasim/5.0` | testler, yerel sunucu, derleme scriptleri |
 
 `Bridge.getProxyUrl()` / `setProxyUrl()` kullanıcı proxy adresi (`customProxyBase`; kalıcı `ulasim.proxyUrl` + `KV proxyUrl`). Boş → aynı-origin `./api/proxy`.
 
 ### Dağıtım adapter'ları
 
-- **Cloudflare Pages (HEDEF):** statik `dist/` + `functions/api/proxy.js`. `functions/` altında Cloudflare Pages Function; `onRequest`, `OPTIONS`, `GET ?url=`, `POST` JSON; `handleProxyRequest`. **Yalnızca Cloudflare.**
-- **Cloudflare Worker (varyant):** `worker.js` + `wrangler.jsonc`; `main: worker.js`, `assets.directory ./dist`, `run_worker_first ["/api/*","/health"]`, `single-page-application`; `/api/proxy`, `/health`, `env.ASSETS`. Basitleştirilmiş proxy (circuit breaker/coalescing yok). Hedef dışı; planlanan konsolidasyon Cloudflare `functions/api/proxy.js`.
-- **Tam Node sunucusu (Faz 1'de kaldırılacak):** `server.js` (`npm start`, port 4173/`PORT`); `dist/` (yoksa `public/`), SPA fallback, gzip, MIME, cache headers; `/api/proxy`, `/api/stream`, `/api/fleet`, `/api/health`, `/api/metrics`, `/api/google/routes|places|geocode`; IP rate limit; `server/sseHub.js`, `server/googleMapsProxy.js`, `server/cacheLayer.js`, `server/apiGateway.js`. **Render** `render.yaml` + `npm start`.
-- **Vercel (Faz 1'de kaldırılacak):** `vercel.json` + `api/proxy.js` (`handleProxyRequest`, CORS, `OPTIONS`, `GET/POST`), build `npm run build`, output `dist`, `/sw.js no-cache`, rewrite `/api/proxy`.
-- **GitHub Pages (Faz 1'de kaldırılacak):** `.github/workflows/deploy-pages.yml`; Node 22, `npm ci || npm install`, `npm run build`, `cp dist/index.html dist/404.html`, Pages deploy; `base: "./"`.
+- **Cloudflare Pages** `wrangler.jsonc` ile `dist/` dosyalarını ve `functions/api/proxy.js` adapter'ını kullanır. `onRequest`, isteği doğrudan `handleProxyHttpRequest` işlevine iletir.
+- **Cloudflare Workers** `wrangler.worker.jsonc` ile `worker.js` dosyasını çalıştırır. `/api/proxy` için aynı `handleProxyHttpRequest` işlevini çağırır. `/health` sürümü raporlar. Statik dosyalar ve SPA fallback'i `ASSETS` bağlaması üzerinden sunulur.
+- **Yerel Node sunucusu** `npm start` komutuyla `server/localServer.js` dosyasını çalıştırır ve `127.0.0.1:4173` adresini dinler. Port `PORT` ile ayarlanabilir. Paylaşılan proxy çekirdeğini, statik dosyaları, SSE/filo, sağlık, metrik ve Google Maps uçlarını geliştirme ve test için sunar.
 - **Capacitor Android:** `capacitor.config.json` + `android/`; `npm run build` → `npx cap sync android` → Android Studio / `gradlew`. Bkz. README.
 - **Scriptable (Faz 5'te kaldırılacak):** `İstanbul Ulaşım.js`, `legacy/İstanbul Ulaşım.v3.8.js`, `scripts/build-scriptable.mjs`, `npm run build:scriptable` → `releases/`; native köprü; `fetchStaticJson` kapalı (`window.__SCRIPTABLE__`).
 
@@ -141,11 +138,11 @@ scripts/                     Node ESM
 ├── generate-icons.mjs       npm run icons (sharp; assets-src/icon-master.png | public/icons/icon-master.png)
 └── build-scriptable.mjs     npm run build:scriptable (dist → tek dosya Scriptable; releases/) [Faz 5]
 
-functions/api/proxy.js       Cloudflare Pages Function [HEDEF proxy]
+functions/api/proxy.js       Cloudflare Pages Function adapter'ı
 server/                      proxyCore.js, cacheLayer.js, apiGateway.js, sseHub.js, googleMapsProxy.js
-server.js                    tam Node sunucusu [Faz 1]
-api/proxy.js                 Vercel [Faz 1]
-worker.js + wrangler.jsonc   Cloudflare Worker varyantı
+server/localServer.js        yerel Node geliştirme ve test sunucusu
+worker.js + wrangler.worker.jsonc   Cloudflare Worker ve statik dosyalar
+wrangler.jsonc               Cloudflare Pages yapılandırması
 android/                     Capacitor native Android (com.berk.istanbululasim; minSdk 22; target/compile 34)
 tests/                       verify-all.mjs (npm test), benchmark-and-verify.mjs
 legacy/                      Scriptable v3.8 [Faz 5]
@@ -161,7 +158,7 @@ assets-src/                  ikon kaynağı
 | `dev` | `vite` |
 | `build` | `vite build` |
 | `preview` | `vite preview` |
-| `start` | `node server.js` |
+| `start` | `node server/localServer.js` |
 | `icons` | `node scripts/generate-icons.mjs` |
 | `build:scriptable` | `node scripts/build-scriptable.mjs` |
 | `pretest` | `npm run build` |
@@ -184,8 +181,8 @@ assets-src/                  ikon kaynağı
 | **TKM (İBB trafik)** | `tkmservices.ibb.gov.tr/web/api/TrafficData/v3/Segments/:seviye`, `/v4/SegmentData`, `/v1/TrafficIndex_Sc1_Cont`, `IntensityMap/v2/Piers` | segment geometrisi; 90 sn `SegmentData` cache; indeks; iskeleler (`NM/LT/LN/OP`); renk skalası `TRAFIK_RENK` |
 | **İSPARK** | `api.ibb.gov.tr/ispark/Park` | kapasite/boş/ücretsiz dk; koordinat süzme; 2 dk cache; `yakinlar` haversine; fallback `ispark.json` |
 | **Transitous** | `api.transitous.org/api/v1/plan`, `/geocode`, `/map/stops`, `/stoptimes` | İstanbul bbox süzme; `numItineraries=5`; canlı `realTime`; rota fallback |
-| **Google (opsiyonel)** | `server/googleMapsProxy.js` + `src/services/googleMapsService.js` | sunucu anahtarı; `/api/google/routes|places|geocode`; tam Node sunucusu; hedef proxy setinde değil; `google` sağlık anahtarı |
-| **SSE (tam sunucu)** | `/api/stream`, `/api/fleet` (`server/sseHub.js`) | `DataProvider.connectStream`, `fetchFleetBbox`; proxy yoksa kapalı; Cloudflare hedef proxy'de yok |
+| **Google (opsiyonel)** | `server/googleMapsProxy.js` + `src/services/googleMapsService.js` | yerel Node sunucusunda anahtarla `/api/google/routes`, `/api/google/places` ve `/api/google/geocode` |
+| **SSE (yerel)** | `/api/stream`, `/api/fleet` (`server/sseHub.js`) | `DataProvider.connectStream`, `fetchFleetBbox` |
 
 ### Statik fallback (`public/data`)
 
@@ -207,7 +204,7 @@ assets-src/                  ikon kaynağı
    - **Circuit breaker:** `gateway.isCircuitOpen(provider)` → `STALE-FAILOVER` veya `503`; `detectProvider`; `recordSuccess/recordFailure`; `coalesce`.
    - **Fetch:** süzülmüş header + `User-Agent`, 25 sn timeout, `POST` body string; yanıt ham metin + `content-type`. 2xx–3xx → cache; `X-Proxy-Cache: MISS`. Hata → `recordFailure`, `STALE-FAILOVER` veya `502`.
 5. `API` normalize eder (İETT JSON/XML, Metro `Data`, Vapur HTML, TKM, İSPARK, Transitous). Hata → `catch` → statik/KV/`[]`/`null`/`{}`; canlı `GetHatOtoKonum` hata → `[]`.
-6. `DataProvider` sağlayıcı sağlığını günceller; UI `panelYenile` + `surgicalLiveUpdate`; `NotificationEngine.checkUpdates`; SSE (tam sunucu) `konumIsle` + `aracCiz`.
+6. `DataProvider` sağlayıcı sağlığını günceller; UI `panelYenile` + `surgicalLiveUpdate`; `NotificationEngine.checkUpdates`; yerel SSE `konumIsle` + `aracCiz`.
 7. **Kalıcılık:** `KV` (IndexedDB `istanbul-ulasim-v4`, `localStorage` fallback, `ulasim.proxyUrl`); `public/sw.js`; `localStorage` tema/dil. Kişisel veri harici sunucuya gönderilmez (sadece proxy'lenen **hedef URL/body**; örn. SOAP, Transitous koordinatları!).
 
 > Not: Transitous `plan`/`geocode`/`map/stops` istekleri kullanıcı konumu/koordinatlarını içerir ve proxy'lenir; allowlist dışına çıkmaz.
@@ -225,7 +222,7 @@ assets-src/                  ikon kaynağı
 | `GetHat_json`/`gethat_json`, `DurakDetay_GYY`/`durakdetay`, `GetPlanlananSeferSaati`/`planlanansefersaati`, `metroistanbul` | 600 |
 | diğer | 0 (`no-store`) |
 
-> Bağımsız `worker.js` varyantında sadeleştirilmiş TTL (ör. `GetHatOtoKonum` 4 sn; `GetFiloAracKonum` yok; `currentAnnouncement` yok) ve stale/coalescing/breaker yok. Hedef `functions/api/proxy.js` `proxyCore.js` çekirdeğini kullanır.
+Pages ve Worker aynı TTL, önbellek, circuit breaker ve istek birleştirme kurallarını uygular.
 
 ### 6.3 Proxy güvenliği (SSRF ve sınırlar)
 
@@ -234,7 +231,7 @@ assets-src/                  ikon kaynağı
 - İletilen header'lar **sadece** `content-type`, `soapaction`, `accept`; sabit `User-Agent`; `SOAPAction` İETT için.
 - 25 sn `AbortController`; `clearTimeout`.
 - CORS `Access-Control-Allow-Origin: *`, `GET, POST, OPTIONS`, `Content-Type, SOAPAction`.
-- `proxyCore` hata gövdeleri JSON. Tam `server.js` ek: `2MB` gövde sınırı, IP rate limit `429`, `gzip`, path normalize + traversal koruması, `/api/health` + `/api/metrics`.
+- `proxyCore` hata gövdelerini JSON olarak oluşturur. Yerel Node sunucusu 2 MB gövde sınırı, IP bazlı `429`, gzip, statik yol normalizasyonu, `/api/health` ve `/api/metrics` sağlar.
 - Cache `server/cacheLayer.js`: bellek + **Redis fallback** (`sharedCache`, `allowStale`); `X-Proxy-Cache`; `getMetrics`. (Cloudflare adapter ek altyapı gerektirmez.)
 
 ---
@@ -279,7 +276,7 @@ assets-src/                  ikon kaynağı
 
 ### Build
 
-`npm install` → `npm run build` (`vite build`, `dist/`, `assets/`, `base:"./"`, sourcemap kapalı, esbuild, `outDir dist`). Dev `npm run dev` (5173 + `/api/proxy`→4173; `npm start` 4173 ile tam backend); `npm run preview`. Capacitor `npx cap sync android` + `gradlew`. `npm start` `server.js` 4173/`PORT`.
+`npm ci` ile kilitli bağımlılıkları kurun ve `npm run build` ile Vite 6 çıktısını `dist/` dizinine yazın. `npm run dev`, port 5173'te açılır ve `/api/proxy` isteklerini `npm start` ile başlatılan yerel sunucuya iletir. `npm run preview` statik derlemeyi sunar. Android için `npx cap sync android` ve `gradlew` kullanılır.
 
 ### Test (`npm test`)
 
@@ -299,29 +296,21 @@ assets-src/                  ikon kaynağı
 
 ## 11. Güvenlik ve gizlilik notları
 
-- SSRF allowlist; method/CORS/header süzme; timeout; body sınırı (tam sunucu); rate limit (tam sunucu); circuit breaker; statik `User-Agent`.
+- Proxy çekirdeği SSRF allowlist'i, yöntem ve header süzme, CORS, zaman aşımı, circuit breaker ve sabit `User-Agent` uygular. Yerel Node sunucusu gövde boyutunu ve IP bazlı istek sayısını sınırlar.
 - API anahtarları (ör. Google) **sunucu** tarafında; istemciye gömülmez. Harici veri yalnızca izinli hedeflere proxy'lenir.
 - Kişisel veri harici sunucuda tutulmaz; önbellek cihazda / proxy üzerinde; `KV` yerel. (Transitous koordinatları hedefe gider; bkz. §6.1.)
-- Scriptable/legacy ve ekstra dağıtım yüzeyleri **kapsam dışına** alınacak (aşağı).
 
 ---
 
 ## 12. Kararlar ve planlanan değişiklikler
 
-### Karar: hedef dağıtım yalnızca Cloudflare
+### Faz 1
 
-Tek üretim hedefi **Cloudflare**; statik `dist/` + **Cloudflare Pages Function `functions/api/proxy.js`**. **Proxy tek uçtur.** Proxy çekirdeği `server/proxyCore.js`. (Şu an kod birden çok adapter içerir; **planlanan** konsolidasyon.)
+Üretim hedefi Cloudflare. Pages ve Workers aynı `/api/proxy` sözleşmesini ve çekirdeği paylaşır. Her iki yapılandırma da `2025-11-01` uyumluluk tarihini ve `nodejs_compat` bayrağını kullanır. Yerel önizleme komutları README'dedir.
 
-### Planlanan değişiklikler (bu görevde UYGULANMADI; yalnızca not)
+Capacitor 6, Android API 22 desteğini korumak için bu fazda tutuldu. Yamalanmış `tar` ana sürümünü zorlamak Android şablon çıkarma adımını bozdu. `npm audit` Capacitor CLI zincirinde beş geliştirme bağımlılığı bulgusu raporlar.
 
-**Faz 1 — kaldırılacak dağıtım hedefleri:**
-
-- **Render** `render.yaml` (+ `npm start`/`server.js` dağıtımı).
-- **Vercel** `vercel.json` + `api/proxy.js`.
-- **GitHub Pages** `.github/workflows/deploy-pages.yml`.
-- Sonuç: **Render, Vercel, GitHub Pages Faz 1'de kaldırılacak**; **hedef dağıtım yalnızca Cloudflare (`functions/api/proxy.js`)** kalacak. `server.js`, `server/*`, `worker.js`/`wrangler.jsonc` ele alınacak.
-
-**Faz 5 — Scriptable/legacy kaldırılacak:**
+### Faz 5
 
 - `İstanbul Ulaşım.js`, `legacy/İstanbul Ulaşım.v3.8.js`, `scripts/build-scriptable.mjs`, `npm run build:scriptable`, `releases/`, `window.__SCRIPTABLE__` köprüsü, `src/core/storage.js` Scriptable/localStorage uyumu, `api.js` Scriptable yolları, `tests/verify-all.mjs` Scriptable artefakt kontrolü.
 

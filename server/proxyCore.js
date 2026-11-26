@@ -164,3 +164,28 @@ export const CORS_HEADERS = {
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, SOAPAction",
 };
+
+export async function handleProxyHttpRequest(request) {
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
+
+  let payload;
+  if (request.method === "GET") {
+    const url = new URL(request.url).searchParams.get("url") || "";
+    payload = { url, method: "GET" };
+  } else if (request.method === "POST") {
+    payload = await request.json().catch(() => ({}));
+  } else {
+    return new Response(JSON.stringify({ error: "Method not allowed" }), {
+      status: 405,
+      headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    });
+  }
+
+  const result = await handleProxyRequest(payload);
+  return new Response(result.text, {
+    status: result.status,
+    headers: { ...CORS_HEADERS, ...result.headers },
+  });
+}

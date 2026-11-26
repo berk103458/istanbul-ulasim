@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "start": "node server.js",
+    "start": "node server/localServer.js",
     "icons": "node scripts/generate-icons.mjs",
     "build:scriptable": "node scripts/build-scriptable.mjs",
     "pretest": "npm run build",
