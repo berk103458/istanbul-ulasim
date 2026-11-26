@@ -1,6 +1,6 @@
 {
   "name": "istanbul-ulasim",
-  "version": "4.0.0",
+  "version": "5.0.0",
   "private": true,
   "type": "module",
   "description": "İstanbul Ulaşım — Canlı Otobüs, Metrobüs, Metro, Marmaray, Vapur, İSPARK ve Akıllı Rota Planlayıcı",
@@ -8,9 +8,10 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "start": "node server.js",
+    "start": "node server/localServer.js",
     "icons": "node scripts/generate-icons.mjs",
     "build:scriptable": "node scripts/build-scriptable.mjs",
+    "pretest": "npm run build",
     "test": "node tests/verify-all.mjs"
   },
   "dependencies": {
@@ -23,7 +24,10 @@
   "devDependencies": {
     "@capacitor/android": "^6.2.0",
     "@capacitor/cli": "^6.2.0",
-    "sharp": "^0.33.5",
-    "vite": "^5.4.11"
+    "sharp": "^0.35.5",
+    "vite": "^6.4.6"
+  },
+  "engines": {
+    "node": "^20.10.0 || >=22.0.0"
   }
 }

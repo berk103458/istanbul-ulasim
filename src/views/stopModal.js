@@ -377,7 +377,7 @@ export function createStopModal(S, mc, callbacks) {
       <div class="kart" style="margin-bottom:10px">
         <div class="alt">${esc(t("settings.proxyHint"))}</div>
         <div style="display:flex;gap:8px">
-          <input class="giris" id="proxyInput" placeholder="https://ornek.vercel.app/api/proxy" value="${esc(proxy)}">
+          <input class="giris" id="proxyInput" placeholder="https://ornek.pages.dev" value="${esc(proxy)}">
           <button class="btn" id="proxyKaydetBtn">${esc(t("common.save"))}</button>
         </div>
       </div>

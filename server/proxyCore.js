@@ -11,6 +11,16 @@ const ALLOWED_HOSTS = new Set([
 ]);
 
 const DEFAULT_UA = "Mozilla/5.0 (Linux; Android 14; Mobile) IstanbulUlasim/5.0";
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const MAX_REDIRECTS = 5;
+
+function proxyError(status, error) {
+  return {
+    status,
+    headers: { "Content-Type": "application/json; charset=utf-8" },
+    text: JSON.stringify({ error }),
+  };
+}
 
 export function isAllowedUrl(rawUrl) {
   try {
@@ -47,11 +57,7 @@ export function getCacheTtlSeconds(url, body = "") {
 
 export async function handleProxyRequest({ url, method = "GET", headers = {}, body = null }) {
   if (!url || !isAllowedUrl(url)) {
-    return {
-      status: 403,
-      headers: { "Content-Type": "application/json; charset=utf-8" },
-      text: JSON.stringify({ error: "Forbidden target host" }),
-    };
+    return proxyError(403, "Forbidden target host");
   }
 
   const upperMethod = String(method || "GET").toUpperCase();
@@ -111,12 +117,38 @@ export async function handleProxyRequest({ url, method = "GET", headers = {}, bo
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 25000);
     try {
-      const res = await fetch(url, {
+      let target = url;
+      let options = {
         method: upperMethod,
         headers: safeHeaders,
         body: upperMethod === "POST" && body != null ? String(body) : undefined,
         signal: controller.signal,
-      });
+        redirect: "manual",
+      };
+      let res;
+      for (let redirects = 0; ; redirects++) {
+        res = await fetch(target, options);
+        const location = REDIRECT_STATUSES.has(res.status) ? res.headers.get("location") : null;
+        if (location === null) break;
+
+        if (res.body) void res.body.cancel().catch(() => {});
+        let nextUrl;
+        try {
+          nextUrl = new URL(location, target).href;
+        } catch {
+          return proxyError(403, "Invalid redirect target");
+        }
+        if (!isAllowedUrl(nextUrl)) return proxyError(403, "Forbidden redirect target host");
+        if (redirects >= MAX_REDIRECTS) return proxyError(502, "Too many upstream redirects");
+
+        // Preserve fetch's POST-to-GET behavior on 301, 302, and 303.
+        if (options.method === "POST" && [301, 302, 303].includes(res.status)) {
+          const headers = Object.fromEntries(Object.entries(options.headers)
+            .filter(([name]) => name.toLowerCase() !== "content-type"));
+          options = { ...options, method: "GET", body: undefined, headers };
+        }
+        target = nextUrl;
+      }
       const text = await res.text();
       const contentType = res.headers.get("content-type") || "text/plain; charset=utf-8";
       const ms = performance.now() - t0;
@@ -164,3 +196,35 @@ export const CORS_HEADERS = {
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, SOAPAction",
 };
+
+function proxyResponse({ status, headers, text }) {
+  return new Response([204, 205, 304].includes(status) ? null : text, {
+    status,
+    headers: { ...CORS_HEADERS, ...headers },
+  });
+}
+
+export async function handleProxyHttpRequest(request) {
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: CORS_HEADERS });
+  }
+
+  let payload;
+  if (request.method === "GET") {
+    const url = new URL(request.url).searchParams.get("url") || "";
+    payload = { url, method: "GET" };
+  } else if (request.method === "POST") {
+    const type = request.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
+    if (type !== "application/json") {
+      return proxyResponse(proxyError(400, "Expected application/json content type"));
+    }
+    payload = await request.json().catch(() => null);
+    if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+      return proxyResponse(proxyError(400, "Expected a JSON object"));
+    }
+  } else {
+    return proxyResponse(proxyError(405, "Method not allowed"));
+  }
+
+  return proxyResponse(await handleProxyRequest(payload));
+}

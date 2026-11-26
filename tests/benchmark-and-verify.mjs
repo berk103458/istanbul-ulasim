@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { createServer } from "../server.js";
+import { createServer } from "../server/localServer.js";
 import { sharedCache } from "../server/cacheLayer.js";
 import { Zaman } from "../src/core/time.js";
 import { Core } from "../src/core/geo.js";

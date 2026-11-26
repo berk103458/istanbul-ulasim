@@ -2,21 +2,23 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { handleProxyRequest, CORS_HEADERS } from "./server/proxyCore.js";
-import { sharedCache } from "./server/cacheLayer.js";
-import { gateway } from "./server/apiGateway.js";
-import { handleSseConnection, getFleetInBbox } from "./server/sseHub.js";
+import { handleProxyHttpRequest, CORS_HEADERS } from "./proxyCore.js";
+import { sharedCache } from "./cacheLayer.js";
+import { gateway } from "./apiGateway.js";
+import { handleSseConnection, getFleetInBbox } from "./sseHub.js";
 import {
   isGoogleMapsConfigured,
   handleGoogleRoutes,
   handleGooglePlaces,
   handleGoogleGeocode,
-} from "./server/googleMapsProxy.js";
+} from "./googleMapsProxy.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DIST_DIR = path.join(__dirname, "dist");
-const PUBLIC_DIR = path.join(__dirname, "public");
+const root = fileURLToPath(new URL("../", import.meta.url));
+const { version } = createRequire(import.meta.url)("../package.json");
+const DIST_DIR = path.join(root, "dist");
+const PUBLIC_DIR = path.join(root, "public");
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -154,7 +156,7 @@ export function createServer() {
         JSON.stringify({
           ok: true,
           service: "istanbul-ulasim",
-          version: "5.0.0",
+          version,
           googleMapsConfigured: isGoogleMapsConfigured(),
           redis: m.cache.redis,
           providers: m.providers,
@@ -166,24 +168,18 @@ export function createServer() {
 
     if (reqUrl.pathname === "/api/proxy") {
       try {
-        let payload;
-        if (req.method === "GET") {
-          payload = { url: reqUrl.searchParams.get("url") || "", method: "GET" };
-        } else if (req.method === "POST") {
-          const raw = await readBody(req);
-          payload = JSON.parse(raw || "{}");
-        } else {
-          res.writeHead(405, CORS_HEADERS);
-          res.end("Method Not Allowed");
-          return;
-        }
-        const result = await handleProxyRequest(payload);
+        const result = await handleProxyHttpRequest({
+          method: req.method,
+          url: reqUrl.href,
+          headers: new Headers(req.headers["content-type"] ? { "Content-Type": req.headers["content-type"] } : {}),
+          json: async () => JSON.parse(await readBody(req)),
+        });
         sendCompressed(
           req,
           res,
           result.status,
-          { ...CORS_HEADERS, ...result.headers },
-          Buffer.from(result.text, "utf8"),
+          Object.fromEntries(result.headers),
+          Buffer.from(await result.arrayBuffer()),
           ".json"
         );
       } catch (e) {
@@ -225,7 +221,7 @@ export function createServer() {
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.PORT) || 4173;
   const server = createServer();
-  server.listen(port, "0.0.0.0", () => {
-    console.log(`Istanbul Ulasim v5.0 server listening on http://localhost:${port}`);
+  server.listen(port, "127.0.0.1", () => {
+    console.log(`Istanbul Ulasim v${version} local server listening on http://127.0.0.1:${port}`);
   });
 }
