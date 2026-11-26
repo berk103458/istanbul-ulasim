@@ -1,12 +1,15 @@
 /**
- * İstanbul Ulaşım v4.0 — Yakınımda (Nearby Stops, Hubs, Favorite Lines)
+ * İstanbul Ulaşım v5.0 — Yakınımda (Non-Blocking GPS, Smart Commute, Favorite Stops, Corridors & Fleet Radar)
  */
 import L from "leaflet";
-import { Zaman } from "../core/time.js";
 import { Core } from "../core/geo.js";
 import { API } from "../core/api.js";
 import { iconSvg } from "../ui/icons.js";
+import { t } from "../i18n/index.js";
+import { TrafficEngine } from "../engines/trafficEngine.js";
 import { esc, bas, metre, renkKod, sureEtiket, hataMesaji } from "../map/mapController.js";
+
+export const DEFAULT_HUB = { ad: "Kadıköy", lat: 40.9904, lon: 29.0235, varsayilan: true };
 
 export const HIZLI_SEMTLER = [
   { ad: "Kadıköy", lat: 40.9904, lon: 29.0235 },
@@ -19,41 +22,180 @@ export const HIZLI_SEMTLER = [
 ];
 
 export function otobusSatiriHTML(hat, x) {
+  const key = `${hat}/${x.bus.kapino}`;
+  const etaText = x.t.dakika <= 1 ? t("eta.arriving") : `~${Math.round(x.t.dakika)} dk`;
   return `
-    <div class="kart satir tik" data-odakla="${esc(hat)}/${esc(x.bus.kapino)}">
+    <div class="kart satir tik" data-odakla="${esc(key)}">
       <div class="kart-sol">
         <div class="bas">
-          ${x.t.durakSayisi === 0 ? "Sıradaki durak" : `${x.t.durakSayisi} durak`}
-          ${x.gozlenen ? '<span class="canli">CANLI</span>' : ""}
+          ${x.t.durakSayisi === 0 ? esc(t("eta.stopNext")) : esc(t("eta.stopsAway", { n: x.t.durakSayisi }))}
+          ${x.gozlenen ? `<span class="canli">${esc(t("common.live"))}</span>` : ""}
         </div>
         <div class="alt">
-          <span>${metre(x.t.metre)} uzakta</span>
+          <span>${esc(t("eta.distanceAway", { m: metre(x.t.metre) }))}</span>
           <span>· ${esc(x.bus.kapino)}</span>
-          ${x.gozlenen ? "<span>· trafik hesaba katıldı</span>" : ""}
+          ${x.gozlenen ? `<span>· ${esc(t("eta.trafficFactored"))}</span>` : ""}
         </div>
       </div>
-      <div class="kart-sag">${sureEtiket(x.t.dakika)}</div>
+      <div class="kart-sag" data-live-eta="${esc(key)}" data-live-dk="${Math.round(x.t.dakika)}">${sureEtiket(x.t.dakika).replace(/>[^<]+</, `>${esc(etaText)}<`)}</div>
     </div>`;
 }
 
 export function createNearbyView(S, mc, callbacks) {
+  let gpsPending = false;
+  let corridorCache = { data: null, incidents: [], ts: 0 };
+
+  function triggerBackgroundGps() {
+    if (gpsPending || S.ben || S.semt) return;
+    gpsPending = true;
+    mc.benimKonum(true)
+      .then((pos) => {
+        if (pos && !S.semt && callbacks.sayfa().tur === "yakin") {
+          callbacks.ciz(true);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        gpsPending = false;
+      });
+  }
+
+  function buildSmartSuggestionHTML(ti) {
+    const hour = new Date().getHours();
+    const ev = S.savedPlaces?.ev;
+    const is = S.savedPlaces?.is;
+    const items = [];
+
+    if (hour >= 6 && hour < 12 && is) {
+      items.push(`
+        <div class="kart satir tik" data-akilli-rota="is" style="background:var(--vurgu-yumusak)">
+          <div class="kart-sol">
+            <div class="bas">${iconSvg("work", 15)} <span>${esc(t("nearby.goToWork"))} · ${esc(is.ad)}</span></div>
+            <div class="alt">${esc(t("nearby.smartMorning", { ad: is.ad }))}</div>
+          </div>
+          <div class="kart-sag">${iconSvg("chevronRight", 16)}</div>
+        </div>`);
+    } else if (hour >= 16 && hour < 23 && ev) {
+      items.push(`
+        <div class="kart satir tik" data-akilli-rota="ev" style="background:var(--vurgu-yumusak)">
+          <div class="kart-sol">
+            <div class="bas">${iconSvg("home", 15)} <span>${esc(t("nearby.goToHome"))} · ${esc(ev.ad)}</span></div>
+            <div class="alt">${esc(t("nearby.smartEvening", { ad: ev.ad }))}</div>
+          </div>
+          <div class="kart-sag">${iconSvg("chevronRight", 16)}</div>
+        </div>`);
+    }
+
+    if (ti != null && ti >= 65) {
+      items.push(`
+        <div class="uyari-banner">
+          <span>${iconSvg("alert", 15)} ${esc(t("nearby.heavyTrafficTip", { ti: Math.round(ti) }))}</span>
+          <span style="display:flex;gap:6px">
+            <button class="btn kucuk" data-sekme="rayli">${iconSvg("metro", 13)} ${esc(t("nav.rayli"))}</button>
+            <button class="btn kucuk" data-sekme="vapur">${iconSvg("vapur", 13)} ${esc(t("nav.vapur"))}</button>
+          </span>
+        </div>`);
+    }
+
+    if (!items.length) return "";
+    return `<div class="baslik-satir"><h2>${esc(t("nearby.smartTitle"))}</h2></div>${items.join("")}`;
+  }
+
+  function buildFavoriteStopsHTML() {
+    const favStops = S.favoriDuraklar || [];
+    if (!favStops.length) return "";
+    return `
+      <div class="baslik-satir">
+        <h2>${esc(t("nearby.favStops"))}</h2>
+        <span class="soluk">${favStops.length}</span>
+      </div>
+      <div class="liste">
+        ${favStops
+          .map(
+            (st, idx) => `
+          <div class="kart satir tik" data-fav-durak="${idx}">
+            <div class="kart-sol">
+              <div class="bas">${iconSvg("starFill", 14)} <span>${esc(bas(st.ad || "Durak"))}</span></div>
+              <div class="alt">${st.kod ? `Durak ${esc(st.kod)}` : esc(t("modal.stopBoard"))}</div>
+            </div>
+            <div class="kart-sag">${iconSvg("chevronRight", 16)}</div>
+          </div>`
+          )
+          .join("")}
+      </div>`;
+  }
+
+  function buildCorridorsHTML(corridors, incidents) {
+    const list = Array.isArray(corridors) ? corridors : [];
+    const incList = Array.isArray(incidents) ? incidents.slice(0, 3) : [];
+    if (!list.length && !incList.length) return "";
+
+    const badgeCls = (level) => (level >= 4 ? "hata" : level === 3 ? "uyari" : "iyi");
+    const levelLabel = (level) =>
+      level >= 4 ? t("traffic.severe") : level === 3 ? t("traffic.heavy") : level === 2 ? t("traffic.moderate") : t("traffic.smooth");
+
+    return `
+      <div class="baslik-satir"><h2>${esc(t("traffic.corridorsTitle"))}</h2></div>
+      <div class="kart">
+        ${list
+          .slice(0, 5)
+          .map(
+            (c) => `
+          <div class="saglik-satir">
+            <span style="font-weight:600">${esc(c.name || c.ad || "")}</span>
+            <span style="display:flex;align-items:center;gap:6px">
+              ${c.speedKmh != null ? `<span class="alt">${Math.round(c.speedKmh)} km/sa</span>` : ""}
+              <span class="durum-rozet ${badgeCls(c.level ?? 1)}">${esc(levelLabel(c.level ?? 1))}</span>
+            </span>
+          </div>`
+          )
+          .join("")}
+        ${
+          incList.length
+            ? `<div class="alt" style="margin-top:8px;font-weight:700">${esc(t("traffic.incidentsTitle"))}</div>` +
+              incList
+                .map(
+                  (inc) => `
+                <div class="alt" style="margin-top:4px">
+                  ${iconSvg("alert", 13)} <span>${esc(inc.title || inc.road || inc.description || "")}</span>
+                </div>`
+                )
+                .join("")
+            : ""
+        }
+      </div>`;
+  }
+
   async function render(p, ilk, no) {
     if (ilk) {
-      callbacks.onYukle("Yakınımda", false);
+      callbacks.onYukle(t("nearby.title"), false);
       mc.aktifHatlarAyarla(S.favoriler);
     }
 
-    if ((ilk || !S.ben) && !S.semt) {
-      await mc.benimKonum(true);
-    }
+    // Non-blocking GPS: fire in background, render immediately with fallback hub
+    triggerBackgroundGps();
 
-    const refPoint = S.semt || S.ben;
+    const refPoint = S.semt || S.ben || DEFAULT_HUB;
     const favs = S.favoriler.slice();
 
-    // Fetch announcements + favorite lines in parallel
+    // Fetch announcements, corridors/incidents (cached 90s), and favorite lines in parallel
     const duyuruPromise = API.iett.duyurular ? API.iett.duyurular().catch(() => []) : Promise.resolve([]);
-    const [duyurular, hatalarRaw] = await Promise.all([
+    const corridorPromise =
+      Date.now() - corridorCache.ts < 90e3 && corridorCache.data
+        ? Promise.resolve(corridorCache)
+        : Promise.all([
+            typeof TrafficEngine?.analyzeCorridors === "function"
+        ? Promise.resolve().then(() => TrafficEngine.analyzeCorridors()).catch(() => [])
+        : Promise.resolve([]),
+            typeof TrafficEngine?.fetchIncidents === "function" ? TrafficEngine.fetchIncidents().catch(() => []) : Promise.resolve([]),
+          ]).then(([data, incidents]) => {
+            corridorCache = { data, incidents, ts: Date.now() };
+            return corridorCache;
+          });
+
+    const [duyurular, corridorRes, hatalarRaw] = await Promise.all([
       duyuruPromise,
+      corridorPromise,
       Promise.all(
         favs.map(async (h) => {
           try {
@@ -99,17 +241,20 @@ export function createNearbyView(S, mc, callbacks) {
     }
 
     mc.hedefKatmani.clearLayers();
-    const noktalar = refPoint ? [[refPoint.lat, refPoint.lon]] : [];
+    const noktalar = [[refPoint.lat, refPoint.lon]];
 
-    // Header & status
-    let html = callbacks.baslikHTML("Yakınımda", false);
+    // Header & Fleet Radar Quick Toggle
+    const fleetBtn = `<button class="btn kucuk ${S.filoRadar ? "birincil" : ""}" data-filo-toggle>${iconSvg("otobus", 14)} ${esc(S.filoRadar ? t("nearby.fleetOn") : t("nearby.fleetOff"))}${S.filoRadar && mc.getFiloCount() ? ` (${mc.getFiloCount()})` : ""}</button>`;
+    let html = callbacks.baslikHTML(esc(t("nearby.title")), false, fleetBtn);
 
     if (S.semt) {
-      html += `<div class="alt" style="margin-bottom:8px">${iconSvg("konum", 14)} <b style="color:var(--yazi)">${esc(S.semt.ad)}</b> merkezi seçili · <button class="btn kucuk" data-semt-temizle>Konumuma dön</button></div>`;
+      html += `<div class="alt" style="margin-bottom:8px">${iconSvg("konum", 14)} <b style="color:var(--yazi)">${esc(S.semt.ad)}</b> ${esc(t("nearby.hubSelected"))} · <button class="btn kucuk" data-semt-temizle>${esc(t("nearby.backToLocation"))}</button></div>`;
     } else if (S.ben) {
-      html += `<div class="alt" style="margin-bottom:8px">Konumunuz ±${Math.round(S.ben.acc || 0)} m <span class="canli">CANLI</span></div>`;
+      html += `<div class="alt" style="margin-bottom:8px">${esc(t("nearby.locLive", { acc: Math.round(S.ben.acc || 0) }))} <span class="canli">${esc(t("common.live"))}</span></div>`;
+    } else if (gpsPending) {
+      html += `<div class="alt" style="margin-bottom:8px">${iconSvg("konum", 13)} ${esc(t("nearby.locPending", { ad: refPoint.ad }))}</div>`;
     } else {
-      html += `<div class="alt" style="margin-bottom:8px">Konum alınamadı. Haritadan ${iconSvg("konum", 13)} konumunuzu açın veya aşağıdan bir semt seçin.</div>`;
+      html += `<div class="alt" style="margin-bottom:8px">${esc(t("nearby.locMissing"))}</div>`;
     }
 
     if (S.konumHata) {
@@ -119,162 +264,162 @@ export function createNearbyView(S, mc, callbacks) {
       html += `<div class="duyuru"><span class="duyuru-ikon">${iconSvg("alert", 18)}</span><span>${hatalar.map(esc).join("<br>")}</span></div>`;
     }
 
-    // Quick Hub Chips (Hızlı Semt Seç)
+    // Quick Hub Chips
     html += `
       <div class="hizli-yerler" aria-label="Hızlı Semt Seç">
         ${HIZLI_SEMTLER.map(
           (s) =>
-            `<button class="cip ${S.semt?.ad === s.ad ? "aktif" : ""}" data-semt="${esc(s.ad)}">${esc(s.ad)}</button>`
+            `<button class="cip ${S.semt?.ad === s.ad || (refPoint.varsayilan && s.ad === refPoint.ad) ? "aktif" : ""}" data-semt="${esc(s.ad)}">${esc(s.ad)}</button>`
         ).join("")}
       </div>`;
 
+    // Smart Commute Suggestion
+    const ti = mc.getTrafikIndeks()?.TI ?? null;
+    html += buildSmartSuggestionHTML(ti);
+
+    // Favorite Stops
+    html += buildFavoriteStopsHTML();
+
     // Nearby Stops & Stations around refPoint
     let yakinHTML = "";
-    if (refPoint) {
-      const [trStops, metroIst, metroHat, mrIst, iskeleler] = await Promise.all([
-        API.transitous?.yakinDuraklar ? API.transitous.yakinDuraklar(refPoint.lat, refPoint.lon).catch(() => []) : Promise.resolve([]),
-        API.metro.istasyonlar().catch(() => []),
-        API.metro.hatlar().catch(() => []),
-        typeof API.marmaray?.istasyonlar === "function"
-          ? API.marmaray.istasyonlar().catch(() => [])
-          : Promise.resolve(API.marmaray?.istasyonlar || []),
-        API.iskeleler().catch(() => []),
-      ]);
+    const [trStops, metroIst, metroHat, mrIst, iskeleler] = await Promise.all([
+      API.transitous?.yakinDuraklar ? API.transitous.yakinDuraklar(refPoint.lat, refPoint.lon).catch(() => []) : Promise.resolve([]),
+      API.metro.istasyonlar().catch(() => []),
+      API.metro.hatlar().catch(() => []),
+      typeof API.marmaray?.istasyonlar === "function"
+        ? API.marmaray.istasyonlar().catch(() => [])
+        : Promise.resolve(API.marmaray?.istasyonlar || []),
+      API.iskeleler().catch(() => []),
+    ]);
 
-      if (no !== callbacks.getCizimNo()) return null;
+    if (no !== callbacks.getCizimNo()) return null;
 
-      const yakinDuraklar = [];
+    const yakinDuraklar = [];
+    for (const st of trStops || []) {
+      const lat = Number(st.lat);
+      const lon = Number(st.lon);
+      if (!isFinite(lat) || !isFinite(lon)) continue;
+      const m = Core.mesafe(refPoint, { lat, lon });
+      if (m > 1200) continue;
+      yakinDuraklar.push({
+        tur: "otobus",
+        ad: bas(st.name || st.ad || "Durak"),
+        kod: st.code || st.kod || "",
+        stopId: st.stopId || st.id || "",
+        lat,
+        lon,
+        m,
+        alt: t("nav.otobus"),
+        renk: "var(--mod-otobus)",
+      });
+    }
 
-      // Bus stops from Transitous
-      for (const st of trStops || []) {
-        const lat = Number(st.lat);
-        const lon = Number(st.lon);
-        if (!isFinite(lat) || !isFinite(lon)) continue;
-        const m = Core.mesafe(refPoint, { lat, lon });
-        if (m > 1200) continue;
-        yakinDuraklar.push({
-          tur: "otobus",
-          ad: bas(st.name || st.ad || "Durak"),
-          kod: st.code || st.kod || "",
-          stopId: st.stopId || st.id || "",
-          lat,
-          lon,
-          m,
-          alt: "Otobüs Durağı",
-          renk: "var(--mod-otobus)",
-        });
-      }
+    const hatMap = new Map((metroHat || []).map((h) => [h.id, h]));
+    for (const s of metroIst || []) {
+      const m = Core.mesafe(refPoint, s);
+      if (m > 1500) continue;
+      const h = hatMap.get(s.hatId);
+      yakinDuraklar.push({
+        tur: "rayli",
+        id: s.id,
+        ad: s.ad,
+        hat: s.hat,
+        lat: s.lat,
+        lon: s.lon,
+        m,
+        alt: `${s.hat} · ${t("nav.rayli")}`,
+        renk: h?.renk || "var(--mod-metro)",
+      });
+    }
 
-      // Metro / Tram / Funicular stations
-      const hatMap = new Map((metroHat || []).map((h) => [h.id, h]));
-      for (const s of metroIst || []) {
-        const m = Core.mesafe(refPoint, s);
-        if (m > 1500) continue;
-        const h = hatMap.get(s.hatId);
-        yakinDuraklar.push({
-          tur: "rayli",
-          id: s.id,
-          ad: s.ad,
-          hat: s.hat,
-          lat: s.lat,
-          lon: s.lon,
-          m,
-          alt: `${s.hat} · Raylı Sistem`,
-          renk: h?.renk || "var(--mod-metro)",
-        });
-      }
+    for (const s of mrIst || []) {
+      const m = Core.mesafe(refPoint, s);
+      if (m > 1500) continue;
+      yakinDuraklar.push({
+        tur: "marmaray",
+        id: "mr:" + s.ad,
+        ad: s.ad,
+        hat: "MR",
+        lat: s.lat,
+        lon: s.lon,
+        m,
+        alt: "Marmaray",
+        renk: "var(--mod-marmaray)",
+      });
+    }
 
-      // Marmaray stations
-      for (const s of mrIst || []) {
-        const m = Core.mesafe(refPoint, s);
-        if (m > 1500) continue;
-        yakinDuraklar.push({
-          tur: "marmaray",
-          id: "mr:" + s.ad,
-          ad: s.ad,
-          hat: "MR",
-          lat: s.lat,
-          lon: s.lon,
-          m,
-          alt: "Marmaray",
-          renk: "var(--mod-marmaray)",
-        });
-      }
+    for (const pier of iskeleler || []) {
+      const m = Core.mesafe(refPoint, pier);
+      if (m > 1500) continue;
+      yakinDuraklar.push({
+        tur: "vapur",
+        ad: pier.ad,
+        hat: t("nav.vapur"),
+        lat: pier.lat,
+        lon: pier.lon,
+        m,
+        alt: pier.op || "Şehir Hatları",
+        renk: "var(--mod-vapur)",
+      });
+    }
 
-      // Vapur piers
-      for (const p of iskeleler || []) {
-        const m = Core.mesafe(refPoint, p);
-        if (m > 1500) continue;
-        yakinDuraklar.push({
-          tur: "vapur",
-          ad: p.ad,
-          hat: "Vapur",
-          lat: p.lat,
-          lon: p.lon,
-          m,
-          alt: `${p.op || "Şehir Hatları"} İskelesi`,
-          renk: "var(--mod-vapur)",
-        });
-      }
+    yakinDuraklar.sort((a, b) => a.m - b.m);
+    const gosterilen = yakinDuraklar.slice(0, 8);
+    callbacks.setNearbyCache(gosterilen);
 
-      yakinDuraklar.sort((a, b) => a.m - b.m);
-      const gosterilen = yakinDuraklar.slice(0, 8);
-      callbacks.setNearbyCache(gosterilen);
-
-      if (gosterilen.length) {
-        if (ilk) {
-          for (const d of gosterilen) {
-            noktalar.push([d.lat, d.lon]);
-            L.circleMarker([d.lat, d.lon], {
-              radius: 6,
-              color: "#fff",
-              weight: 2,
-              fillColor: d.renk.startsWith("var(") ? "#0f62fe" : d.renk,
-              fillOpacity: 0.95,
-            })
-              .bindTooltip(esc(d.ad))
-              .addTo(mc.katman);
-          }
-        }
-        yakinHTML += `<div class="baslik-satir"><h2>Yakındaki Duraklar &amp; İstasyonlar</h2><span class="soluk">${gosterilen.length} nokta</span></div>`;
-        yakinHTML += `<div class="liste">${gosterilen
-          .map((d, idx) => {
-            const ikonAd = d.tur === "vapur" ? "vapur" : d.tur === "marmaray" ? "marmaray" : d.tur === "rayli" ? "metro" : "busStop";
-            return `
-              <div class="kart satir tik" data-yakin-durak="${idx}">
-                <div class="kart-sol">
-                  <div class="bas">
-                    <span class="rozet" style="background:${esc(d.renk)}">${iconSvg(ikonAd, 13)} ${esc(d.hat || "Durak")}</span>
-                    <span>${esc(d.ad)}</span>
-                  </div>
-                  <div class="alt">${esc(d.alt)}</div>
-                </div>
-                <div class="kart-sag">
-                  <span class="sure tarife">${metre(d.m)}</span>
-                  ${iconSvg("chevronRight", 16)}
-                </div>
-              </div>`;
+    if (gosterilen.length) {
+      if (ilk) {
+        for (const d of gosterilen) {
+          noktalar.push([d.lat, d.lon]);
+          L.circleMarker([d.lat, d.lon], {
+            radius: 6,
+            color: "#fff",
+            weight: 2,
+            fillColor: d.renk.startsWith("var(") ? "#0f62fe" : d.renk,
+            fillOpacity: 0.95,
           })
-          .join("")}</div>`;
+            .bindTooltip(esc(d.ad))
+            .addTo(mc.katman);
+        }
       }
+      yakinHTML += `<div class="baslik-satir"><h2>${esc(t("nearby.stopsHeading"))}</h2><span class="soluk">${esc(t("nearby.pointsCount", { n: gosterilen.length }))}</span></div>`;
+      yakinHTML += `<div class="liste">${gosterilen
+        .map((d, idx) => {
+          const ikonAd = d.tur === "vapur" ? "vapur" : d.tur === "marmaray" ? "marmaray" : d.tur === "rayli" ? "metro" : "busStop";
+          return `
+            <div class="kart satir tik" data-yakin-durak="${idx}">
+              <div class="kart-sol">
+                <div class="bas">
+                  <span class="rozet" style="background:${esc(d.renk)}">${iconSvg(ikonAd, 13)} ${esc(d.hat || "Durak")}</span>
+                  <span>${esc(d.ad)}</span>
+                </div>
+                <div class="alt">${esc(d.alt)}</div>
+              </div>
+              <div class="kart-sag">
+                <span class="sure tarife">${metre(d.m)}</span>
+                ${iconSvg("chevronRight", 16)}
+              </div>
+            </div>`;
+        })
+        .join("")}</div>`;
     }
 
     // Favorite Lines
-    let favHTML = `<div class="baslik-satir"><h2>Favori Hatlarım</h2><span class="soluk">${favs.length} hat</span></div>`;
+    let favHTML = `<div class="baslik-satir"><h2>${esc(t("nearby.favLines"))}</h2><span class="soluk">${esc(t("nearby.linesCount", { n: favs.length }))}</span></div>`;
     if (!favs.length) {
-      favHTML += `<div class="bos">Henüz favori hat yok. Otobüs sekmesinden hat arayıp yıldız ile ekleyin.</div>`;
+      favHTML += `<div class="bos">${esc(t("nearby.noFavLines"))}</div>`;
     } else {
       favHTML += `<div class="liste">`;
       for (const hat of favs) {
         const v = S.hatVeri[hat];
         const duyuruVar = duyuruSet.has(hat);
-        const duyuruBadge = duyuruVar ? `<span class="rozet" style="background:var(--uyari)">${iconSvg("alert", 12)} Duyuru</span>` : "";
+        const duyuruBadge = duyuruVar ? `<span class="rozet" style="background:var(--uyari)">${iconSvg("alert", 12)}</span>` : "";
 
         if (!v?.duraklar || !Object.keys(v.duraklar).length) {
           favHTML += `
             <div class="kart satir tik" data-hat="${esc(hat)}">
               <div class="kart-sol">
-                <div class="bas"><span class="rozet" style="background:${renkKod(hat)}">${esc(hat)}</span>${duyuruBadge}<span class="alt">Hat verisi alınamadı</span></div>
+                <div class="bas"><span class="rozet" style="background:${renkKod(hat)}">${esc(hat)}</span>${duyuruBadge}<span class="alt">${esc(t("nearby.lineFetchErr"))}</span></div>
               </div>
               <div class="kart-sag">${iconSvg("chevronRight", 16)}</div>
             </div>`;
@@ -283,15 +428,14 @@ export function createNearbyView(S, mc, callbacks) {
 
         for (const yon of Object.keys(v.duraklar).sort()) {
           const liste = v.duraklar[yon];
-          // Use refPoint temporarily if S.ben isn't set or S.semt is active
           const origBen = S.ben;
-          if (S.semt) S.ben = S.semt;
+          if (S.semt || !S.ben) S.ben = refPoint;
           const h = mc.hedefDurak(hat, yon);
           S.ben = origBen;
 
           let govde = "";
           if (!h) {
-            govde = `<div class="alt">Konum ya da seçili durak yok.</div>`;
+            govde = `<div class="alt">${esc(t("nearby.noLocOrStop"))}</div>`;
           } else {
             noktalar.push([h.d.lat, h.d.lon]);
             mc.durakIsaretle(hat, h.d, v.renk);
@@ -300,10 +444,10 @@ export function createNearbyView(S, mc, callbacks) {
               const a = S.arac.get(hat + "/" + gel[0].bus.kapino);
               if (a) noktalar.push([a.gor.lat, a.gor.lon]);
             }
-            govde = `<div class="alt">${h.secili ? "Durağım" : "En yakın durak"}: <b style="color:var(--yazi)">${esc(bas(h.d.ad))}</b>${h.metre != null ? " · " + metre(h.metre) : ""}</div>`;
+            govde = `<div class="alt">${esc(h.secili ? t("nearby.myStop") : t("nearby.nearestStop"))}: <b style="color:var(--yazi)">${esc(bas(h.d.ad))}</b>${h.metre != null ? " · " + metre(h.metre) : ""}</div>`;
             govde +=
               `<div class="liste" style="margin-top:4px">` +
-              (gel.length ? gel.map((x) => otobusSatiriHTML(hat, x)).join("") : `<div class="alt">Bu yönde yaklaşan otobüs yok</div>`) +
+              (gel.length ? gel.map((x) => otobusSatiriHTML(hat, x)).join("") : `<div class="alt">${esc(t("nearby.noApproaching"))}</div>`) +
               `</div>`;
           }
 
@@ -324,6 +468,9 @@ export function createNearbyView(S, mc, callbacks) {
       favHTML += `</div>`;
     }
 
+    // Bridges, Tunnels & Traffic Incidents summary
+    const corridorsHTML = buildCorridorsHTML(corridorRes.data, corridorRes.incidents);
+
     if (no !== callbacks.getCizimNo()) return null;
 
     if (ilk && noktalar.length) {
@@ -334,7 +481,8 @@ export function createNearbyView(S, mc, callbacks) {
       html +
       yakinHTML +
       favHTML +
-      `<p class="alt" style="margin-top:14px">Otobüs süreleri son dakikalardaki gerçek hıza ve güzergah mesafesine göre hesaplanır.</p>`
+      corridorsHTML +
+      `<p class="alt" style="margin-top:14px">${esc(t("nearby.etaFootnote"))}</p>`
     );
   }
 

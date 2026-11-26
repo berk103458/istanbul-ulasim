@@ -1,5 +1,5 @@
 /**
- * İstanbul Ulaşım v4.0 — Leaflet Map Controller, Live Vehicles, Traffic & İSPARK
+ * İstanbul Ulaşım v5.0 — Leaflet Map Controller, Live Vehicles, Batched Traffic, Fleet Radar & İSPARK
  */
 import L from "leaflet";
 import { Zaman } from "../core/time.js";
@@ -9,6 +9,11 @@ import { Bridge } from "../core/bridge.js";
 import { API } from "../core/api.js";
 import { Plan } from "../core/router.js";
 import { iconSvg } from "../ui/icons.js";
+import { t } from "../i18n/index.js";
+import { DataProvider } from "../engines/dataProvider.js";
+import { TrafficEngine } from "../engines/trafficEngine.js";
+import { EtaEngine } from "../engines/etaEngine.js";
+import { TrackingEngine } from "../engines/trackingEngine.js";
 
 const RENKLER = ["#e4572e", "#0f62fe", "#0a8f4f", "#8e44ad", "#d97706", "#0891b2", "#be185d", "#4d7c0f"];
 const TRAFIK_RENK = { 0: "#9ca3af", 1: "#16a34a", 2: "#84cc16", 3: "#f59e0b", 4: "#dc2626", 5: "#7f1d1d" };
@@ -33,7 +38,7 @@ export const saat = (dk) => {
 };
 
 export const sureEtiket = (k) =>
-  `<span class="sure ${k != null && k <= 3 ? "yakin" : ""}">${k == null ? "–" : k <= 1 ? "geliyor" : "~" + Zaman.kalanYazi(Math.round(k))}</span>`;
+  `<span class="sure ${k != null && k <= 3 ? "yakin" : ""}">${k == null ? "–" : k <= 1 ? esc(t("eta.arriving")) : "~" + Zaman.kalanYazi(Math.round(k))}</span>`;
 
 export const renkKod = (kod) => {
   let h = 0;
@@ -46,7 +51,7 @@ export const metrobusMu = (h) => Boolean(h && /METROBÜS/i.test(h.tarife || ""))
 export const hataMesaji = (e) => {
   const m = String((e && e.message) || e);
   if (/Sunucu hatası|network|Load failed|timed out|Could not connect|offline|Failed to fetch/i.test(m)) {
-    return "Bağlantı kurulamadı. İnternetinizi kontrol edin.";
+    return t("common.networkError");
   }
   return m;
 };
@@ -141,6 +146,7 @@ export function createMapController(S, callbacks) {
   const trafikCizici = L.canvas({ padding: 0.3 });
   const trafikKatmani = L.layerGroup().addTo(map);
   const isparkKatmani = L.layerGroup().addTo(map);
+  const filoKatmani = L.layerGroup().addTo(map);
   const katman = L.layerGroup().addTo(map);
   const aracKatmani = L.layerGroup().addTo(map);
   const durakKatmani = L.layerGroup();
@@ -257,7 +263,7 @@ export function createMapController(S, callbacks) {
 
     const b = document.createElement("button");
     b.className = "btn kucuk";
-    b.textContent = sec ? "Durağım ✓ (kaldır)" : "Durağım yap";
+    b.textContent = sec ? `${t("nearby.myStop")} ✓ (${t("common.clear")})` : t("nearby.myStop");
     b.onclick = () => {
       if (sec) delete S.durak[hat];
       else S.durak[hat] = d.kod;
@@ -269,7 +275,7 @@ export function createMapController(S, callbacks) {
 
     const panoBtn = document.createElement("button");
     panoBtn.className = "btn kucuk birincil";
-    panoBtn.textContent = "Kalkış panosu";
+    panoBtn.textContent = t("modal.stopBoard");
     panoBtn.onclick = () => {
       map.closePopup();
       callbacks.openStopBoard({ ad: bas(d.ad), kod: d.kod, lat: d.lat, lon: d.lon, tur: "otobus" });
@@ -430,12 +436,27 @@ export function createMapController(S, callbacks) {
     const v = S.hatVeri[hat];
     const liste = v?.duraklar?.[yon];
     if (!liste) return [];
+    const ctx = {
+      hat,
+      yon,
+      hatBilgi: v.bilgi,
+      trafficIndex: Trafik.indeks?.TI ?? null,
+      incidents: Trafik.incidents || [],
+    };
     return (v.otobusler || [])
       .filter((b) => b.yon === yon)
       .map((b) => {
         const a = S.arac.get(hat + "/" + b.kapino);
         const p = a ? { ...b, lat: a.gor.lat, lon: a.gor.lon } : b;
-        return { bus: b, t: Core.varisTahmini(liste, p, hedefIndex, aracHizi(hat, b.kapino)), gozlenen: a?.hiz != null };
+        const hizKmSa = aracHizi(hat, b.kapino);
+        let eta = null;
+        if (typeof EtaEngine?.predict === "function") {
+          eta = EtaEngine.predict(liste, p, hedefIndex, { ...ctx, arac: a, hizKmSa });
+        }
+        if (!eta) {
+          eta = Core.varisTahmini(liste, p, hedefIndex, hizKmSa);
+        }
+        return { bus: b, t: eta, gozlenen: a?.hiz != null || Boolean(eta?.trafficFactored) };
       })
       .filter((x) => x.t)
       .sort((a, b) => a.t.metre - b.t.metre);
@@ -476,7 +497,37 @@ export function createMapController(S, callbacks) {
     S.aktifHatlar = yeni;
   }
 
-  // Smooth 1-second bus dead-reckoning along route stops
+  // Smooth 1-second bus dead-reckoning + rAF interpolation
+  let rafId = null;
+  let lastRafMs = 0;
+
+  function stepRaf(ts) {
+    rafId = null;
+    if (document.hidden || !S.arac.size) return;
+    const dt = lastRafMs ? Math.min(0.1, (ts - lastRafMs) / 1000) : 0.016;
+    lastRafMs = ts;
+    if (typeof TrackingEngine?.stepAnimations === "function") {
+      const updated = TrackingEngine.stepAnimations(S.arac, dt);
+      if (updated) {
+        for (const a of S.arac.values()) {
+          if (a.isaret && a.animGor) {
+            a.isaret.setLatLng([a.animGor.lat, a.animGor.lon]);
+          }
+        }
+      }
+    }
+    if (S.arac.size && !document.hidden) {
+      rafId = requestAnimationFrame(stepRaf);
+    }
+  }
+
+  function ensureRaf() {
+    if (!rafId && typeof requestAnimationFrame === "function" && S.arac.size && !document.hidden) {
+      lastRafMs = 0;
+      rafId = requestAnimationFrame(stepRaf);
+    }
+  }
+
   function oluHesap() {
     for (const a of S.arac.values()) {
       if (!a.isaret) continue;
@@ -503,8 +554,9 @@ export function createMapController(S, callbacks) {
         }
       }
       a.gor = p;
-      a.isaret.setLatLng([p.lat, p.lon]);
+      if (!a.animGor) a.isaret.setLatLng([p.lat, p.lon]);
     }
+    ensureRaf();
     if (takipArac) {
       const t = S.arac.get(takipArac);
       if (t?.isaret) map.panTo([t.gor.lat, t.gor.lon], { animate: true, duration: 0.8 });
@@ -670,8 +722,8 @@ export function createMapController(S, callbacks) {
     return seferler;
   }
 
-  // ---------------- Traffic Overlay ----------------
-  const Trafik = { geo: null, ana: null, veri: null, indeks: null, zaman: 0, yukleniyor: false };
+  // ---------------- Traffic Overlay (Batched 5-Layer Canvas + Incidents) ----------------
+  const Trafik = { geo: null, ana: null, spatialIndex: null, veri: null, indeks: null, incidents: [], zaman: 0, yukleniyor: false };
 
   function trafikBilgiYaz(mesaj) {
     const el = document.querySelector("#trafikBilgi");
@@ -685,10 +737,41 @@ export function createMapController(S, callbacks) {
       return;
     }
     const i = Trafik.indeks;
-    const ti = i ? `Trafik %${esc(i.TI)}` : "Trafik";
+    const ti = i ? t("traffic.index", { ti: esc(i.TI) }) : t("traffic.title");
     const bolge = i ? ` · And %${esc(i.TI_An)} · Avr %${esc(i.TI_Av)}` : "";
     const bar = [1, 2, 3, 4, 5].map((k) => `<i style="display:inline-block;width:10px;height:4px;border-radius:2px;background:${TRAFIK_RENK[k]}"></i>`).join("");
     el.innerHTML = `<span>${ti}${bolge}</span><span style="display:inline-flex;gap:2px;align-items:center">${bar}</span>`;
+  }
+
+  function olayCiz() {
+    if (!S.trafik || !Array.isArray(Trafik.incidents) || !Trafik.incidents.length) return;
+    const b = map.getBounds().pad(0.15);
+    let count = 0;
+    for (const inc of Trafik.incidents) {
+      const lat = Number(inc.lat);
+      const lon = Number(inc.lon);
+      if (!isFinite(lat) || !isFinite(lon) || !b.contains([lat, lon])) continue;
+      const tip = inc.type || inc.tur || "other";
+      const kaza = tip === "accident" || /kaza/i.test(inc.title || inc.description || "");
+      const icon = L.divIcon({
+        className: "",
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
+        html: `<div class="olay-pin ${kaza ? "kaza" : ""}" title="${esc(inc.title || "")}">!</div>`,
+      });
+      const tipEtiket = t(`traffic.incidentType.${kaza ? "accident" : tip === "roadwork" ? "roadwork" : tip === "congestion" ? "congestion" : "other"}`);
+      const popupHtml = `
+        <div style="min-width:170px">
+          <div style="font-weight:800;margin-bottom:4px;color:${kaza ? "var(--hata)" : "var(--uyari)"}">${esc(tipEtiket)}</div>
+          ${inc.title || inc.road ? `<div style="font-weight:600;margin-bottom:3px">${esc(inc.title || inc.road)}</div>` : ""}
+          ${inc.description ? `<div style="font-size:12px;opacity:.85">${esc(inc.description)}</div>` : ""}
+          ${inc.time ? `<div style="font-size:11px;opacity:.65;margin-top:4px">${esc(inc.time)}</div>` : ""}
+        </div>`;
+      L.marker([lat, lon], { icon, zIndexOffset: 650 })
+        .bindPopup(popupHtml)
+        .addTo(trafikKatmani);
+      if (++count >= 60) break;
+    }
   }
 
   function trafikCiz() {
@@ -696,48 +779,84 @@ export function createMapController(S, callbacks) {
     if (!S.trafik || !Trafik.geo || !Trafik.veri) return;
     const z = map.getZoom();
     const b = map.getBounds().pad(0.15);
+    const kalin = z < 12 ? 2.5 : z < 15 ? 4 : 6;
+
+    if (typeof TrafficEngine?.getVisibleBatchedPolylines === "function" && Trafik.spatialIndex) {
+      const batches = TrafficEngine.getVisibleBatchedPolylines(Trafik.spatialIndex, Trafik.veri, b, z) || [];
+      let drawn = 0;
+      for (const batch of batches) {
+        const latlngs = batch.latlngs || batch.coords || batch.lines;
+        if (!latlngs?.length) continue;
+        L.polyline(latlngs, {
+          renderer: trafikCizici,
+          color: batch.color || TRAFIK_RENK[batch.level] || "#999",
+          weight: kalin,
+          opacity: 0.85,
+          interactive: false,
+        }).addTo(trafikKatmani);
+        if (++drawn >= 5) break;
+      }
+      olayCiz();
+      return;
+    }
+
+    // Fallback batched by level (max 5 polylines)
     const s = b.getSouth(), w = b.getWest(), n = b.getNorth(), e = b.getEast();
     const sadeceAna = z < 13;
     const adim = z < 12 ? 6 : z < 14 ? 2 : 1;
-    const kalin = z < 12 ? 2.5 : z < 15 ? 4 : 6;
-    let sayi = 0;
+    const buckets = new Map();
     for (const [id, duz, a, bb, c, d] of Trafik.geo) {
       if (c < s || a > n || d < w || bb > e) continue;
-      if (sadeceAna && !Trafik.ana.has(id)) continue;
+      if (sadeceAna && !Trafik.ana?.has(id)) continue;
       const v = Trafik.veri.get(id);
       if (!v) continue;
+      const lvl = Math.min(5, Math.max(1, Number(v[0]) || 1));
       const ll = [];
       for (let i = 0; i < duz.length; i += 2 * adim) ll.push([duz[i], duz[i + 1]]);
       if (duz.length >= 2) ll.push([duz[duz.length - 2], duz[duz.length - 1]]);
-      L.polyline(ll, {
+      if (!buckets.has(lvl)) buckets.set(lvl, []);
+      buckets.get(lvl).push(ll);
+    }
+    for (const [lvl, multiLatLng] of buckets) {
+      L.polyline(multiLatLng, {
         renderer: trafikCizici,
-        color: TRAFIK_RENK[v[0]] || "#999",
+        color: TRAFIK_RENK[lvl] || "#999",
         weight: kalin,
         opacity: 0.85,
         interactive: false,
       }).addTo(trafikKatmani);
-      if (++sayi > 6000) break;
     }
+    olayCiz();
   }
 
   async function trafikYukle(zorla) {
     if (Trafik.yukleniyor) return;
     Trafik.yukleniyor = true;
-    trafikBilgiYaz("Trafik yükleniyor…");
+    trafikBilgiYaz(t("traffic.loading"));
     try {
       if (!Trafik.geo) {
         const [g0, g4] = await Promise.all([API.trafik.geometri(0), API.trafik.geometri(4).catch(() => [])]);
         Trafik.geo = g0;
         Trafik.ana = new Set(g4.map((x) => x[0]));
+        if (typeof TrafficEngine?.buildSpatialIndex === "function") {
+          Trafik.spatialIndex = TrafficEngine.buildSpatialIndex(Trafik.geo, Trafik.ana);
+        }
       }
       if (zorla || Date.now() - Trafik.zaman > 110e3) {
-        [Trafik.veri, Trafik.indeks] = await Promise.all([API.trafik.veri(), API.trafik.indeks()]);
+        const [veri, indeks, incidents] = await Promise.all([
+          API.trafik.veri(),
+          API.trafik.indeks(),
+          typeof TrafficEngine?.fetchIncidents === "function" ? TrafficEngine.fetchIncidents().catch(() => []) : Promise.resolve([]),
+        ]);
+        Trafik.veri = veri;
+        Trafik.indeks = indeks;
+        Trafik.incidents = Array.isArray(incidents) ? incidents : [];
         Trafik.zaman = Date.now();
       }
       trafikCiz();
       trafikBilgiYaz();
     } catch (e) {
-      trafikBilgiYaz("Trafik alınamadı: " + hataMesaji(e));
+      trafikBilgiYaz(t("traffic.error", { msg: hataMesaji(e) }));
     } finally {
       Trafik.yukleniyor = false;
     }
@@ -828,9 +947,76 @@ export function createMapController(S, callbacks) {
     }
   }
 
+  // ---------------- Live Fleet Radar (Clustered BBox İETT) ----------------
+  const Filo = { araclar: [], zaman: 0, yukleniyor: false };
+
+  function filoRadarCiz() {
+    filoKatmani.clearLayers();
+    if (!S.filoRadar || !Filo.araclar.length) return;
+    const z = map.getZoom();
+    const b = map.getBounds();
+    const visible =
+      typeof TrackingEngine?.filterVisibleVehicles === "function"
+        ? TrackingEngine.filterVisibleVehicles(Filo.araclar, b)
+        : Filo.araclar.filter((v) => isFinite(v.lat) && isFinite(v.lon) && b.contains([v.lat, v.lon]));
+
+    const items =
+      typeof TrackingEngine?.clusterVehicles === "function"
+        ? TrackingEngine.clusterVehicles(visible, z, b)
+        : visible.slice(0, 120).map((v) => ({ type: "vehicle", ...v }));
+
+    for (const item of items || []) {
+      if (item.cluster || item.type === "cluster" || (item.count && item.count > 1)) {
+        const count = item.count || item.vehicles?.length || 2;
+        const icon = L.divIcon({
+          className: "",
+          iconSize: [36, 36],
+          iconAnchor: [18, 18],
+          html: `<div class="filo-kume">${count}</div>`,
+        });
+        L.marker([item.lat, item.lon], { icon, zIndexOffset: 420 })
+          .on("click", () => map.setView([item.lat, item.lon], Math.min(17, z + 2), { animate: true }))
+          .addTo(filoKatmani);
+      } else {
+        const v = item.vehicle || item;
+        const hat = v.hat || v.hatKodu || "";
+        const kapino = v.kapino || v.kapiNo || "";
+        const renk = renkKod(hat || kapino);
+        const icon = aracIkon("otobus", renk, v.yonAci ?? null, hat, false);
+        L.marker([v.lat, v.lon], { icon, zIndexOffset: 430 })
+          .on("click", () => {
+            if (hat && kapino) callbacks.aracAc(hat, kapino);
+          })
+          .addTo(filoKatmani);
+      }
+    }
+  }
+
+  async function filoRadarYukle(zorla = false) {
+    if (!S.filoRadar || Filo.yukleniyor) return;
+    if (!zorla && Date.now() - Filo.zaman < 12e3 && Filo.araclar.length) {
+      filoRadarCiz();
+      return;
+    }
+    Filo.yukleniyor = true;
+    try {
+      const b = map.getBounds();
+      const bbox = { south: b.getSouth(), west: b.getWest(), north: b.getNorth(), east: b.getEast() };
+      const res = typeof DataProvider?.fetchFleetBbox === "function" ? await DataProvider.fetchFleetBbox(bbox) : [];
+      Filo.araclar = Array.isArray(res) ? res : res?.vehicles || [];
+      Filo.zaman = Date.now();
+      filoRadarCiz();
+    } catch {
+      // ignore transient fleet radar error
+    } finally {
+      Filo.yukleniyor = false;
+    }
+  }
+
   map.on("moveend zoomend", () => {
     if (S.trafik) trafikCiz();
     if (S.ispark) isparkCiz();
+    if (S.filoRadar) filoRadarYukle(false);
   });
 
   // ---------------- Location ----------------
@@ -872,6 +1058,7 @@ export function createMapController(S, callbacks) {
     hedefKatmani,
     trafikKatmani,
     isparkKatmani,
+    filoKatmani,
     updateBaseLayer,
     zoomAyarla,
     haritaTemizle,
@@ -898,9 +1085,14 @@ export function createMapController(S, callbacks) {
     trafikYukle,
     trafikCiz,
     trafikBilgiYaz,
+    getTrafikIndeks: () => Trafik.indeks,
+    getTrafikIncidents: () => Trafik.incidents || [],
     isparkYukle,
     isparkCiz,
     isparkBilgiYaz,
+    filoRadarYukle,
+    filoRadarCiz,
+    getFiloCount: () => Filo.araclar.length,
     benimKonum,
     setTakipArac,
     getTakipArac,

@@ -1,19 +1,33 @@
 /**
- * İstanbul Ulaşım v4.0 — Otobüs & Metrobüs (Search, Line Detail, Live Vehicle Card)
+ * İstanbul Ulaşım v5.0 — Otobüs & Metrobüs (Search, Line Detail, Live Vehicle Card + 9-Factor ETA & Alerts)
  */
 import { Zaman } from "../core/time.js";
 import { Core } from "../core/geo.js";
 import { API } from "../core/api.js";
 import { iconSvg } from "../ui/icons.js";
+import { t } from "../i18n/index.js";
+import { EtaEngine } from "../engines/etaEngine.js";
+import { NotificationEngine } from "../engines/notificationEngine.js";
 import { esc, bas, metre, saat, renkKod, metrobusMu } from "../map/mapController.js";
 import { otobusSatiriHTML } from "./nearbyView.js";
 
 const GUN_ADI = { I: "Hafta içi", C: "Cumartesi", P: "Pazar" };
 
+function formatHms(ms) {
+  const d = new Date(ms);
+  const p2 = (n) => String(n).padStart(2, "0");
+  return `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
+}
+
+function isWatched(hat, durakKod) {
+  const list = typeof NotificationEngine?.getWatches === "function" ? NotificationEngine.getWatches() : [];
+  return list.some((w) => w.hat === hat && (!durakKod || w.durakKod === durakKod));
+}
+
 export function createBusView(S, mc, callbacks) {
   async function renderList(p, ilk) {
     if (ilk) {
-      callbacks.onYukle("Otobüs ve Metrobüs", false);
+      callbacks.onYukle(t("bus.title"), false);
       mc.aktifHatlarAyarla([]);
     }
     const [hatlar, duyurular] = await Promise.all([
@@ -31,17 +45,17 @@ export function createBusView(S, mc, callbacks) {
       duyuruMap.get(k).push(d.mesaj || d.MESAJ || d.tip || "Duyuru");
     }
 
-    let html = callbacks.baslikHTML("Otobüs ve Metrobüs", false);
+    let html = callbacks.baslikHTML(esc(t("bus.title")), false);
     html += `
       <div class="arama-kutu">
         <span class="arama-ikon">${iconSvg("search", 17)}</span>
-        <input class="giris" id="ara" placeholder="Hat kodu veya adı: 500T, 34BZ, Kadıköy…" value="${esc(S.arama || "")}" autocomplete="off" autocapitalize="characters">
+        <input class="giris" id="ara" placeholder="${esc(t("bus.searchPlaceholder"))}" value="${esc(S.arama || "")}" autocomplete="off" autocapitalize="characters">
       </div>
       <div class="cip-satir" aria-label="Otobüs Kategorileri">
-        <button class="cip ${kat === "tumu" ? "aktif" : ""}" data-bus-kat="tumu">Tümü</button>
-        <button class="cip ${kat === "fav" ? "aktif" : ""}" data-bus-kat="fav">${iconSvg("starFill", 14)} Favoriler</button>
-        <button class="cip ${kat === "mb" ? "aktif" : ""}" data-bus-kat="mb">${iconSvg("mb", 14)} Metrobüs</button>
-        <button class="cip ${kat === "duyuru" ? "aktif" : ""}" data-bus-kat="duyuru">${iconSvg("alert", 14)} Duyurular (${duyuruMap.size})</button>
+        <button class="cip ${kat === "tumu" ? "aktif" : ""}" data-bus-kat="tumu">${esc(t("bus.catAll"))}</button>
+        <button class="cip ${kat === "fav" ? "aktif" : ""}" data-bus-kat="fav">${iconSvg("starFill", 14)} ${esc(t("bus.catFav"))}</button>
+        <button class="cip ${kat === "mb" ? "aktif" : ""}" data-bus-kat="mb">${iconSvg("mb", 14)} ${esc(t("bus.catMb"))}</button>
+        <button class="cip ${kat === "duyuru" ? "aktif" : ""}" data-bus-kat="duyuru">${iconSvg("alert", 14)} ${esc(t("bus.catAnn"))} (${duyuruMap.size})</button>
       </div>`;
 
     const satir = (h) => {
@@ -169,10 +183,14 @@ export function createBusView(S, mc, callbacks) {
     if (h) {
       mc.durakIsaretle(hat, h.d, v.renk);
       const gel = mc.yaklasanOtobusler(hat, p.yon, h.i).slice(0, 4);
+      const watched = isWatched(hat, h.d.kod);
       html += `
         <div class="kart" style="margin-bottom:10px">
-          <div class="alt">${h.secili ? "Durağım" : "Size en yakın durak"}: <b style="color:var(--yazi)">${esc(bas(h.d.ad))}</b>${h.metre != null ? " · " + metre(h.metre) : ""}</div>
-          <div class="liste">${gel.length ? gel.map((x) => otobusSatiriHTML(hat, x)).join("") : `<div class="alt">Bu yönde yaklaşan otobüs yok</div>`}</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+            <div class="alt">${esc(h.secili ? t("nearby.myStop") : t("nearby.nearestStop"))}: <b style="color:var(--yazi)">${esc(bas(h.d.ad))}</b>${h.metre != null ? " · " + metre(h.metre) : ""}</div>
+            <button class="btn kucuk ${watched ? "birincil" : ""}" data-bildir-hat="${esc(hat)}" data-bildir-durak="${esc(h.d.kod)}" data-bildir-ad="${esc(bas(h.d.ad))}" data-bildir-yon="${esc(p.yon)}">🔔 ${esc(watched ? t("eta.notifying") : t("eta.notify3m"))}</button>
+          </div>
+          <div class="liste" style="margin-top:6px">${gel.length ? gel.map((x) => otobusSatiriHTML(hat, x)).join("") : `<div class="alt">${esc(t("nearby.noApproaching"))}</div>`}</div>
         </div>`;
     } else {
       html += `<div class="alt" style="margin-bottom:8px">Durağınızı seçmek için listeden veya haritadan bir durağa dokunun.</div>`;
@@ -290,24 +308,51 @@ export function createBusView(S, mc, callbacks) {
     );
 
     if (!a) {
-      return baslik + `<div class="bos">Bu araç şu an görünmüyor (sefer bitmiş veya konum gelmiyor).</div>`;
+      return baslik + `<div class="bos">${esc(t("bus.vehicleMissing"))}</div>`;
     }
 
     const liste = v.duraklar?.[a.yon] || [];
     const simdi = Zaman.simdi();
     const s = liste.length ? Core.siradakiDurak(liste, a.gor) : -1;
     const hiz = mc.aracHizi(p.hat, a.kapino);
-    const tah = (i) => (liste.length && s >= 0 && i >= s ? Core.varisTahmini(liste, a.gor, i, hiz) : null);
+    const ti = mc.getTrafikIndeks?.()?.TI ?? null;
+    const incidents = mc.getTrafikIncidents?.() || [];
+    const tah = (i) => {
+      if (!liste.length || s < 0 || i < s) return null;
+      if (typeof EtaEngine?.predict === "function") {
+        const res = EtaEngine.predict(liste, { ...a.b, lat: a.gor.lat, lon: a.gor.lon }, i, {
+          hat: p.hat,
+          yon: a.yon,
+          arac: a,
+          hatBilgi: v.bilgi,
+          hizKmSa: hiz,
+          trafficIndex: ti,
+          incidents,
+        });
+        if (res) return res;
+      }
+      return Core.varisTahmini(liste, a.gor, i, hiz);
+    };
 
     const yas = Math.max(0, Math.round((Date.now() - a.gercek.ms) / 1000));
-    const durum = [];
-    if (a.hiz != null) durum.push(a.hiz < 3 ? "duruyor / trafikte" : `~${Math.round(a.hiz)} km/sa`);
-    durum.push(yas < 90 ? `konum ${yas} sn önce` : `konum ${Math.round(yas / 60)} dk önce`);
+    const yasStr = yas < 90 ? t("eta.secAgo", { n: yas }) : t("eta.minAgo", { n: Math.round(yas / 60) });
+    const hms = formatHms(a.gercek.ms);
+
+    const badges = [];
+    if (a.b?.sapma || a.b?.deviation) badges.push(`<span class="durum-rozet uyari">${esc(t("eta.deviation"))}</span>`);
+    if (a.b?.gecikme || a.b?.delayed) badges.push(`<span class="durum-rozet uyari">${esc(t("eta.delayed"))}</span>`);
+    if (a.b?.hizmetDisi || a.b?.outOfService) badges.push(`<span class="durum-rozet hata">${esc(t("eta.outOfService"))}</span>`);
+
+    const plaka = a.b?.plaka || a.b?.plate || "";
+    const operator = a.b?.operator || v.bilgi?.operator || "";
 
     let kart = `<div class="kart">`;
-    if (liste.length) kart += `<div class="bas">→ ${esc(bas(liste[liste.length - 1].ad))} yönü</div>`;
+    if (liste.length) kart += `<div class="bas" style="justify-content:space-between"><span>→ ${esc(bas(liste[liste.length - 1].ad))}</span><span style="display:flex;gap:4px">${badges.join("")}</span></div>`;
     if (v.bilgi?.ad) kart += `<div class="alt">${esc(bas(v.bilgi.ad))}</div>`;
-    kart += `<div class="alt">${durum.join(" · ")}</div>`;
+    kart += `<div class="alt">${esc(t("eta.lastUpdate"))}: <b style="color:var(--yazi)">${esc(hms)}</b> · <span data-live-age="${a.gercek.ms}">${esc(yasStr)}</span>${a.hiz != null ? ` · ~${Math.round(a.hiz)} km/sa` : ""}</div>`;
+    if (plaka || operator) {
+      kart += `<div class="alt">${plaka ? `${esc(t("eta.plate"))}: <b style="color:var(--yazi)">${esc(plaka)}</b>` : ""}${plaka && operator ? " · " : ""}${operator ? `${esc(t("eta.operator"))}: <b style="color:var(--yazi)">${esc(operator)}</b>` : ""}</div>`;
+    }
 
     const yer = liste.length ? mc.aracYeri(liste, a) : null;
     if (yer) {
@@ -323,12 +368,28 @@ export function createBusView(S, mc, callbacks) {
 
     const hd = mc.hedefDurak(p.hat, a.yon);
     if (hd && s >= 0) {
-      const t = tah(hd.i);
+      const tEta = tah(hd.i);
+      const watched = isWatched(p.hat, hd.d.kod);
+      const factors = tEta?.factors || {};
+      const speedVal = factors.speedKmh ?? Math.round(hiz);
+      const trafficFactor = factors.trafficMultiplier != null ? `×${Number(factors.trafficMultiplier).toFixed(2)}` : ti != null ? `%${Math.round(ti)}` : "–";
+      const dwellMin = factors.dwellMin != null ? `${Number(factors.dwellMin).toFixed(1)} dk` : "–";
+      const hasIncident = Boolean(tEta?.incidentWarning || factors.incidentPenaltyMin > 0);
+
       kart += `<div class="kart" style="background:var(--vurgu-yumusak)">
-        <div class="alt">${hd.secili ? "Durağınıza" : "Size en yakın durağa"} (${esc(bas(hd.d.ad))})</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+          <div class="alt">${esc(hd.secili ? t("nearby.myStop") : t("nearby.nearestStop"))} (${esc(bas(hd.d.ad))})</div>
+          <button class="btn kucuk ${watched ? "birincil" : ""}" data-bildir-hat="${esc(p.hat)}" data-bildir-durak="${esc(hd.d.kod)}" data-bildir-ad="${esc(bas(hd.d.ad))}" data-bildir-yon="${esc(a.yon)}">🔔 ${esc(watched ? t("eta.notifying") : t("eta.notify3m"))}</button>
+        </div>
         ${
-          t
-            ? `<div class="bas" style="color:var(--vurgu);font-size:20px">${t.dakika <= 1 ? "geliyor" : "~" + t.dakika + " dk"} <span class="alt">${t.durakSayisi} durak · ${metre(t.metre)} · ${saat(simdi + t.dakika)}</span></div>`
+          tEta
+            ? `<div class="bas" style="color:var(--vurgu);font-size:20px" data-live-eta="${esc(key)}">${tEta.dakika <= 1 ? esc(t("eta.arriving")) : `~${tEta.dakika} dk`} <span class="alt">${esc(t("eta.stopsAway", { n: tEta.durakSayisi }))} · ${metre(tEta.metre)} · ${saat(simdi + tEta.dakika)}</span></div>
+               <div class="alt" style="margin-top:4px;gap:8px;flex-wrap:wrap">
+                 <span>${esc(t("eta.speed"))}: <b>${esc(speedVal)} km/sa</b></span>
+                 <span>· ${esc(t("eta.trafficImpact"))}: <b>${esc(trafficFactor)}</b></span>
+                 <span>· ${esc(t("eta.stopDwell"))}: <b>${esc(dwellMin)}</b></span>
+                 ${hasIncident ? `<span class="durum-rozet uyari">${iconSvg("alert", 12)} ${esc(t("eta.incidentWarn"))}</span>` : ""}
+               </div>`
             : `<div class="alt">Durağınızı geçti</div>`
         }
       </div>`;

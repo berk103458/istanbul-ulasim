@@ -535,43 +535,84 @@ export const Plan = (() => {
       });
   }
 
-  class Kuyruk {
-    constructor() {
-      this.a = [];
+  /**
+   * Zero-allocation binary min-heap backed by TypedArrays for A* search.
+   */
+  class TypedHeap {
+    constructor(initialCap = 4096) {
+      this.cap = initialCap;
+      this.size = 0;
+      this.nodes = new Int32Array(initialCap);
+      this.fCosts = new Float64Array(initialCap);
+      this.gCosts = new Float64Array(initialCap);
     }
+
     get bos() {
-      return !this.a.length;
+      return this.size === 0;
     }
-    ekle(x) {
-      const a = this.a;
-      a.push(x);
-      let i = a.length - 1;
+
+    _grow() {
+      const nextCap = this.cap * 2;
+      const n = new Int32Array(nextCap);
+      const f = new Float64Array(nextCap);
+      const g = new Float64Array(nextCap);
+      n.set(this.nodes);
+      f.set(this.fCosts);
+      g.set(this.gCosts);
+      this.nodes = n;
+      this.fCosts = f;
+      this.gCosts = g;
+      this.cap = nextCap;
+    }
+
+    ekle(node, fCost, gCost) {
+      if (this.size === this.cap) this._grow();
+      let i = this.size++;
+      const nodes = this.nodes;
+      const fCosts = this.fCosts;
+      const gCosts = this.gCosts;
       while (i > 0) {
         const p = (i - 1) >> 1;
-        if (a[p].c <= a[i].c) break;
-        [a[p], a[i]] = [a[i], a[p]];
+        if (fCosts[p] <= fCost) break;
+        nodes[i] = nodes[p];
+        fCosts[i] = fCosts[p];
+        gCosts[i] = gCosts[p];
         i = p;
       }
+      nodes[i] = node;
+      fCosts[i] = fCost;
+      gCosts[i] = gCost;
     }
+
     al() {
-      const a = this.a;
-      const top = a[0];
-      const son = a.pop();
-      if (a.length) {
-        a[0] = son;
+      const nodes = this.nodes;
+      const fCosts = this.fCosts;
+      const gCosts = this.gCosts;
+      const topNode = nodes[0];
+      const topF = fCosts[0];
+      const topG = gCosts[0];
+      const last = --this.size;
+      if (last > 0) {
+        const lNode = nodes[last];
+        const lF = fCosts[last];
+        const lG = gCosts[last];
         let i = 0;
-        for (;;) {
-          const l = 2 * i + 1;
+        const half = last >> 1;
+        while (i < half) {
+          let l = (i << 1) + 1;
           const r = l + 1;
-          let m = i;
-          if (l < a.length && a[l].c < a[m].c) m = l;
-          if (r < a.length && a[r].c < a[m].c) m = r;
-          if (m === i) break;
-          [a[m], a[i]] = [a[i], a[m]];
-          i = m;
+          if (r < last && fCosts[r] < fCosts[l]) l = r;
+          if (lF <= fCosts[l]) break;
+          nodes[i] = nodes[l];
+          fCosts[i] = fCosts[l];
+          gCosts[i] = gCosts[l];
+          i = l;
         }
+        nodes[i] = lNode;
+        fCosts[i] = lF;
+        gCosts[i] = lG;
       }
-      return top;
+      return { u: topNode, f: topF, c: topG };
     }
   }
 
@@ -584,7 +625,26 @@ export const Plan = (() => {
     const bacak = new Array(N);
     const binisBilgi = new Array(M - N);
     const yasak = opt.yasakHat || new Set();
-    const Q = new Kuyruk();
+    const Q = new TypedHeap(Math.max(4096, Math.min(M, 32768)));
+
+    // Admissible lower-bound A* heuristic (1150 m/min ~ 69 km/h)
+    const hCache = new Float64Array(N).fill(-1);
+    const hStop = (s) => {
+      let v = hCache[s];
+      if (v < 0) {
+        v = Core.mesafe(ag.duraklar[s], nereye) / 1150;
+        hCache[s] = v;
+      }
+      return v;
+    };
+
+    const dm = Core.mesafe(nereden, nereye);
+    const hedefKume = durakKumesi(ag, nereye);
+    let hedefAday = (hedefKume || []).map(([i]) => [i, 0]);
+    if (!hedefAday.length) hedefAday = yakinDuraklar(ag, nereye, ERISIM_M, ERISIM_MAX_DURAK);
+    if (!hedefAday.length) hedefAday = yakinDuraklar(ag, nereye, ERISIM_GENIS_M, ERISIM_MAX_DURAK);
+    const exitWalkCost = new Map(hedefAday.map(([i, m]) => [i, hedefKume ? 0 : yurumeMaliyet(yurume(m))]));
+    let goalBestCost = dm <= 3500 ? yurumeMaliyet(yurume(dm)) : Infinity;
 
     const durakIt = (s, t, c, b, pr) => {
       if (c < en[s] - 1e-9) {
@@ -592,16 +652,20 @@ export const Plan = (() => {
         zaman[s] = t;
         bacak[s] = b;
         onceki[s] = pr;
-        Q.ekle({ s, c });
+        Q.ekle(s, c + hStop(s), c);
+        if (exitWalkCost.has(s) && !(b.tur === "yuru" && pr === -1)) {
+          const total = c + exitWalkCost.get(s);
+          if (total < goalBestCost) goalBestCost = total;
+        }
       }
     };
-    const aracIt = (k, t, c, bilgi) => {
+    const aracIt = (k, t, c, bilgi, stopIdx) => {
       const u = N + k;
       if (c < en[u] - 1e-9) {
         en[u] = c;
         zaman[u] = t;
         binisBilgi[k] = bilgi;
-        Q.ekle({ s: u, c });
+        Q.ekle(u, c + hStop(stopIdx), c);
       }
     };
 
@@ -618,7 +682,8 @@ export const Plan = (() => {
 
     const bitti = new Uint8Array(M);
     while (!Q.bos) {
-      const { s: u, c } = Q.al();
+      const { u, f: poppedF, c } = Q.al();
+      if (goalBestCost < Infinity && poppedF > goalBestCost + 15) break;
       if (bitti[u] || c > en[u] + 1e-9) continue;
       bitti[u] = 1;
       const t = zaman[u];
@@ -635,7 +700,9 @@ export const Plan = (() => {
         const p = ag.desenler[pi];
         const i = k - ag.ofset[pi];
         const bi = binisBilgi[k];
-        if (i + 1 < p.d.length) aracIt(k + 1, t + p.t[i + 1] - p.t[i], c + p.t[i + 1] - p.t[i], bi);
+        if (i + 1 < p.d.length) {
+          aracIt(k + 1, t + p.t[i + 1] - p.t[i], c + p.t[i + 1] - p.t[i], bi, p.d[i + 1]);
+        }
         if (i > bi.i0) {
           const s = p.d[i];
           durakIt(
@@ -685,7 +752,7 @@ export const Plan = (() => {
         if (gelen.desen === pi || (gelen.hat === p.hat && gelen.tur !== "yuru")) continue;
         const bekle = bekleHesap(p, i, t, opt);
         if (bekle == null || !isFinite(bekle)) continue;
-        aracIt(ag.ofset[pi] + i, t + bekle, c + bekle + BINIS_CEZASI, { s0: s, i0: i, kalk: t + bekle, bekle });
+        aracIt(ag.ofset[pi] + i, t + bekle, c + bekle + BINIS_CEZASI, { s0: s, i0: i, kalk: t + bekle, bekle }, p.d[i]);
       }
 
       const gor = new Set();
@@ -728,12 +795,10 @@ export const Plan = (() => {
     };
 
     let enIyi = null;
-    const dm = Core.mesafe(nereden, nereye);
     if (dm <= 3500) {
       const w = yurume(dm);
       enIyi = { c: yurumeMaliyet(w), bacaklar: [{ tur: "yuru", m: dm, kalkis: t0, varis: t0 + w, from: nereden, to: nereye }] };
     }
-    const hedefKume = durakKumesi(ag, nereye);
     let cikis = (hedefKume || []).filter(([i]) => en[i] < Infinity).map(([i]) => [i, 0]);
     if (!cikis.length) cikis = yakinDuraklar(ag, nereye, ERISIM_M, ERISIM_MAX_DURAK).filter(([i]) => en[i] < Infinity);
     if (!cikis.length) cikis = yakinDuraklar(ag, nereye, ERISIM_GENIS_M, ERISIM_MAX_DURAK).filter(([i]) => en[i] < Infinity);
@@ -898,6 +963,132 @@ export const Plan = (() => {
     return out.sort((a, b) => a.skor - b.skor).slice(0, adet);
   }
 
+  /**
+   * Estimates 2026 Istanbulkart fare for a computed route.
+   * Tam bilet: 27.00 TL, 1. aktarma: 19.33 TL, 2. aktarma: 14.67 TL, 3.+ aktarma: 9.27 TL.
+   * Metrobus scales up to ~40.07 TL; Marmaray scales 27.00–59.76 TL by stop count.
+   * @param {object} route
+   * @returns {{ tamTL: number, ogrenciTL: number }}
+   */
+  function ucretHesapla(route) {
+    const AKTARMA_TARIFE = [27.0, 19.33, 14.67, 9.27];
+    const bacaklar = (route && route.bacaklar) || [];
+    const transit = bacaklar.filter((b) => b.tur && b.tur !== "yuru" && b.tur !== "dis");
+    if (!transit.length) return { tamTL: 0, ogrenciTL: 0 };
+
+    let tamTL = 0;
+    let ogrenciTL = 0;
+    let binisNo = 0;
+
+    for (const b of transit) {
+      const stops = Math.max(1, b.durakSayisi || (b.j != null && b.i != null ? b.j - b.i : 6));
+      let ucret;
+      if (b.tur === "marmaray") {
+        if (stops <= 7) ucret = 27.0;
+        else if (stops <= 14) ucret = 34.72;
+        else if (stops <= 21) ucret = 40.07;
+        else if (stops <= 28) ucret = 46.22;
+        else if (stops <= 35) ucret = 53.99;
+        else ucret = 59.76;
+        // Marmaray does not participate in standard transfer discount; student ~48.8%
+        tamTL += ucret;
+        ogrenciTL += ucret * 0.488;
+      } else if (b.tur === "mb") {
+        const oran = Math.min(1, Math.max(0, (stops - 1) / 33));
+        ucret = stops <= 3 ? 27.0 : 27.0 + oran * (40.07 - 27.0);
+        if (binisNo > 0) ucret = Math.max(19.33, ucret - (27.0 - 19.33));
+        tamTL += ucret;
+        ogrenciTL += ucret * 0.488;
+      } else {
+        const idx = Math.min(binisNo, AKTARMA_TARIFE.length - 1);
+        ucret = AKTARMA_TARIFE[idx];
+        tamTL += ucret;
+        ogrenciTL += ucret * 0.488;
+      }
+      binisNo++;
+    }
+
+    return {
+      tamTL: Math.round(tamTL * 100) / 100,
+      ogrenciTL: Math.round(ogrenciTL * 100) / 100,
+    };
+  }
+
+  /**
+   * Scores a route according to the requested optimization criterion (lower is better).
+   * @param {object} route
+   * @param {"fastest"|"fewest_transfers"|"least_walking"|"least_waiting"|"cheapest"|"traffic_resilient"} kriter
+   * @param {number} [trafficFactor=1.0]
+   * @returns {number}
+   */
+  function puanla(route, kriter = "fastest", trafficFactor = 1.0) {
+    if (!route) return Infinity;
+    const varis = route.varis ?? 0;
+    const aktarma = route.aktarma || 0;
+    const yurumeM = route.yurumeM || 0;
+    const bacaklar = route.bacaklar || [];
+
+    switch (kriter) {
+      case "fewest_transfers":
+        return aktarma * 60 + varis;
+      case "least_walking":
+        return yurumeM * 0.25 + varis;
+      case "least_waiting": {
+        const totalWaitDk = bacaklar.reduce((s, b) => s + (b.bekleme || 0), 0);
+        return totalWaitDk * 4 + varis;
+      }
+      case "cheapest": {
+        const { tamTL } = ucretHesapla(route);
+        return tamTL * 15 + varis;
+      }
+      case "traffic_resilient": {
+        const tf = Math.max(0.5, Number(trafficFactor) || 1.0);
+        const surfacePenalty = bacaklar.reduce((s, b) => {
+          if (b.tur === "otobus") {
+            const dur = Math.max(0, (b.varis ?? 0) - (b.kalkis ?? 0));
+            return s + dur * (tf - 1);
+          }
+          return s;
+        }, 0);
+        return varis + surfacePenalty + aktarma * 1.5;
+      }
+      case "fastest":
+      default:
+        return varis + aktarma * 0.5;
+    }
+  }
+
+  /**
+   * Builds an inverted index mapping every bus/metrobus stop code to all passing line codes.
+   * Enables <1ms Stop Departure Board lookups.
+   * @param {object} ag
+   * @returns {Object<string, string[]>}
+   */
+  function buildStopLinesIndex(ag) {
+    const index = Object.create(null);
+    if (!ag || !ag.duraklar || !ag.desenler) return index;
+
+    const seenByStop = new Map();
+    for (const p of ag.desenler) {
+      if (!p || !p.d || !p.hat) continue;
+      for (const stopIdx of p.d) {
+        const d = ag.duraklar[stopIdx];
+        if (!d || !d.kod) continue;
+        let set = seenByStop.get(d.kod);
+        if (!set) {
+          set = new Set();
+          seenByStop.set(d.kod, set);
+        }
+        set.add(p.hat);
+      }
+    }
+
+    for (const [kod, set] of seenByStop) {
+      index[kod] = [...set].sort();
+    }
+    return index;
+  }
+
   return {
     kur,
     ara,
@@ -916,6 +1107,9 @@ export const Plan = (() => {
     bas,
     otobusHiz,
     otobusAralik,
+    ucretHesapla,
+    puanla,
+    buildStopLinesIndex,
     TUR_ADI,
     HAT_RENK,
     MARMARAY,

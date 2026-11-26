@@ -789,3 +789,148 @@ table.tarife tr.siradaki td {
   background: var(--iyi);
   transition: width 0.3s ease;
 }
+
+/* ============================================================
+   v5.0 Additions: Toast, Incidents, Fleet Cluster, Route Strip,
+   Status Badges, Health Matrix & Disruption Banner
+   ============================================================ */
+
+.toast-kutu {
+  position: fixed;
+  top: calc(12px + env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2600;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(92vw, 400px);
+  pointer-events: none;
+}
+
+.toast-kutu > .toast-oge {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 14px;
+  border-radius: var(--r-orta);
+  background: var(--kart);
+  color: var(--yazi);
+  border: 1px solid var(--cizgi);
+  box-shadow: var(--golge-yuksek);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.olay-pin {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--uyari);
+  color: #fff;
+  border: 2px solid #fff;
+  box-shadow: var(--golge);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.olay-pin.kaza {
+  background: var(--hata);
+}
+
+.filo-kume {
+  min-width: 34px;
+  height: 34px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--vurgu);
+  color: #fff;
+  border: 2px solid #fff;
+  box-shadow: var(--golge);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.karsilastirma-serit {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  border-radius: var(--r-kucuk);
+  background: var(--vurgu-yumusak);
+  color: var(--yazi);
+  font-size: 12px;
+  font-weight: 600;
+  flex-wrap: wrap;
+}
+
+.durum-rozet {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.durum-rozet.iyi {
+  background: rgba(16, 185, 129, 0.14);
+  color: var(--iyi);
+}
+
+.durum-rozet.uyari {
+  background: rgba(245, 158, 11, 0.16);
+  color: var(--uyari);
+}
+
+.durum-rozet.hata {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--hata);
+}
+
+.durum-rozet.soluk {
+  background: var(--kart-2);
+  color: var(--soluk);
+}
+
+.saglik-satir {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--cizgi);
+  font-size: 13px;
+}
+
+.saglik-satir:last-child {
+  border-bottom: 0;
+}
+
+.uyari-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  border-radius: var(--r-orta);
+  background: rgba(245, 158, 11, 0.14);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: var(--yazi);
+  font-size: 12.5px;
+  flex-wrap: wrap;
+}

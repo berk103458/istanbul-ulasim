@@ -1,5 +1,5 @@
 /**
- * İstanbul Ulaşım v4.0 — Slide-up Modal (Stop Departure Board, İSPARK Detail, Settings)
+ * İstanbul Ulaşım v5.0 — Slide-up Modal (Stop Departure Board, Favorite Stops, Settings & Provider Health)
  */
 import { Zaman } from "../core/time.js";
 import { Core } from "../core/geo.js";
@@ -7,6 +7,9 @@ import { KV } from "../core/storage.js";
 import { Bridge } from "../core/bridge.js";
 import { API } from "../core/api.js";
 import { iconSvg } from "../ui/icons.js";
+import { t, getLang, setLang } from "../i18n/index.js";
+import { DataProvider } from "../engines/dataProvider.js";
+import { GoogleMapsService } from "../services/googleMapsService.js";
 import { esc, bas, metre, saat, renkKod, sureEtiket, hataMesaji } from "../map/mapController.js";
 
 export function createStopModal(S, mc, callbacks) {
@@ -41,26 +44,53 @@ export function createStopModal(S, mc, callbacks) {
   });
 
   // ---------------- 1) Durak Kalkış Panosu ----------------
+  function isFavStop(stop) {
+    const list = S.favoriDuraklar || [];
+    return list.some((d) => (stop.kod && d.kod === stop.kod) || (stop.stopId && d.stopId === stop.stopId) || (d.ad === stop.ad && Core.mesafe(d, stop) < 40));
+  }
+
   async function openStopBoard(stop) {
     const baslikAd = esc(bas(stop.ad || "Durak"));
     const mesafeYazi = S.ben && stop.lat ? ` · ${metre(Core.mesafe(S.ben, stop))}` : "";
+    const favStop = isFavStop(stop);
+
     renderBox(`
       <div class="modal-baslik">
-        <div>
+        <div style="min-width:0;flex:1">
           <h3>${iconSvg("busStop", 18)} ${baslikAd}</h3>
-          <div class="alt">${stop.kod ? `Durak ${esc(stop.kod)}` : "Toplu Taşıma Durağı"}${mesafeYazi}</div>
+          <div class="alt">${stop.kod ? `Durak ${esc(stop.kod)}` : esc(t("modal.stopBoard"))}${mesafeYazi}</div>
         </div>
-        <button class="btn ikon" data-modal-kapat aria-label="Kapat">${iconSvg("close", 18)}</button>
+        <div style="display:flex;align-items:center;gap:6px">
+          <button class="btn kucuk ${favStop ? "birincil" : ""}" id="favDurakBtn" title="${esc(favStop ? t("modal.favStopRemove") : t("modal.favStopAdd"))}">
+            ${iconSvg(favStop ? "starFill" : "star", 15)}
+          </button>
+          <button class="btn ikon" data-modal-kapat aria-label="${esc(t("common.close"))}">${iconSvg("close", 18)}</button>
+        </div>
       </div>
       <div id="modalGovde">
         <div class="skeleton skeleton-kart"></div>
         <div class="skeleton skeleton-kart"></div>
       </div>
       <div style="display:flex;gap:8px;margin-top:12px">
-        <button class="btn" style="flex:1" data-durak-rota="nereden">${iconSvg("rota", 16)} Buradan Rota</button>
-        <button class="btn birincil" style="flex:1" data-durak-rota="nereye">${iconSvg("konum", 16)} Hedef Yap</button>
+        <button class="btn" style="flex:1" data-durak-rota="nereden">${iconSvg("rota", 16)} ${esc(t("modal.routeFrom"))}</button>
+        <button class="btn birincil" style="flex:1" data-durak-rota="nereye">${iconSvg("konum", 16)} ${esc(t("modal.routeTo"))}</button>
       </div>
     `);
+
+    const favBtn = document.querySelector("#favDurakBtn");
+    favBtn?.addEventListener("click", () => {
+      S.favoriDuraklar = S.favoriDuraklar || [];
+      const idx = S.favoriDuraklar.findIndex(
+        (d) => (stop.kod && d.kod === stop.kod) || (stop.stopId && d.stopId === stop.stopId) || (d.ad === stop.ad && Core.mesafe(d, stop) < 40)
+      );
+      if (idx >= 0) S.favoriDuraklar.splice(idx, 1);
+      else S.favoriDuraklar.unshift({ kod: stop.kod || "", stopId: stop.stopId || "", ad: bas(stop.ad), lat: stop.lat, lon: stop.lon, tur: stop.tur || "otobus" });
+      KV.set("favoriDuraklar", S.favoriDuraklar);
+      const nowFav = idx < 0;
+      favBtn.classList.toggle("birincil", nowFav);
+      favBtn.innerHTML = iconSvg(nowFav ? "starFill" : "star", 15);
+      if (callbacks.sayfa().tur === "yakin") callbacks.panelYenile();
+    });
 
     const box = modalEl();
     box.querySelectorAll("[data-durak-rota]").forEach((btn) => {
@@ -87,13 +117,18 @@ export function createStopModal(S, mc, callbacks) {
       const kalkislar = [];
       const simdi = Zaman.simdi();
 
-      // 1) Transitous stop times if available (scheduled + RT)
+      // 1) Transitous stop times if available (scheduled + RT) — fix kalkisISO parsing
       const trStopId = stop.stopId || stop.id;
       if (trStopId && typeof API.transitous?.durakSaatleri === "function") {
         try {
           const st = await API.transitous.durakSaatleri(trStopId);
           for (const item of st || []) {
-            const dk = item.zaman ? Zaman.dk(item.zaman) : item.iso ? Math.round((new Date(item.iso) - Date.now()) / 60000 + simdi) : null;
+            const isoRaw = item.kalkisISO || item.iso || item.scheduledTime || item.realTimeDeparture;
+            let dk = item.zaman ? Zaman.dk(item.zaman) : null;
+            if (dk == null && isoRaw) {
+              const parsed = new Date(isoRaw).getTime();
+              if (isFinite(parsed)) dk = Math.round((parsed - Date.now()) / 60000 + simdi);
+            }
             const kalan = dk != null ? dk - simdi : item.kalanDk;
             if (kalan != null && kalan >= -1 && kalan <= 180) {
               kalkislar.push({
@@ -111,9 +146,14 @@ export function createStopModal(S, mc, callbacks) {
         }
       }
 
-      // 2) Merge live İETT GPS from cached/active network or stop's lines
+      // 2) Fast <50ms lookup via S.stopLinesIndex (fallback to S.ag)
       const hatlar = new Set(stop.hatlar || []);
-      if (S.ag && stop.kod) {
+      if (stop.kod && S.stopLinesIndex) {
+        const indexed = typeof S.stopLinesIndex.get === "function" ? S.stopLinesIndex.get(stop.kod) : S.stopLinesIndex[stop.kod];
+        if (indexed) {
+          for (const h of indexed) hatlar.add(h);
+        }
+      } else if (S.ag && stop.kod) {
         const idx = S.ag.duraklar.findIndex((d) => d.kod === stop.kod);
         if (idx >= 0) {
           const dd = S.ag.desenDurak[idx] || [];
@@ -260,53 +300,122 @@ export function createStopModal(S, mc, callbacks) {
   }
 
   // ---------------- 3) Görünüm & Ayarlar ----------------
+  function renderHealthRows(health, gmaps) {
+    const providers = [
+      { key: "iett", label: "İETT" },
+      { key: "metro", label: "Metro İstanbul" },
+      { key: "tkm", label: "İBB Trafik (TKM)" },
+      { key: "vapur", label: "Şehir Hatları / Vapur" },
+      { key: "ispark", label: "İSPARK" },
+      { key: "transitous", label: "Transitous / MOTIS" },
+      { key: "sse", label: "SSE Live Stream" },
+    ];
+
+    const badge = (status) => {
+      if (status === "ok" || status === "healthy" || status === true) {
+        return `<span class="durum-rozet iyi">${esc(t("settings.statusOk"))}</span>`;
+      }
+      if (status === "degraded" || status === "warn" || status === "fallback") {
+        return `<span class="durum-rozet uyari">${esc(t("settings.statusWarn"))}</span>`;
+      }
+      if (status === "unconfigured") {
+        return `<span class="durum-rozet soluk">${esc(t("settings.statusUnconfigured"))}</span>`;
+      }
+      return `<span class="durum-rozet hata">${esc(t("settings.statusDown"))}</span>`;
+    };
+
+    const rows = providers.map((p) => {
+      const info = health?.[p.key] || health?.providers?.[p.key];
+      const st = info?.status ?? (info?.ok === true ? "ok" : info?.ok === false ? "down" : "ok");
+      const lat = info?.latencyMs != null ? `<span class="alt">${Math.round(info.latencyMs)} ms</span>` : "";
+      return `<div class="saglik-satir"><span>${esc(p.label)}</span><span style="display:flex;align-items:center;gap:6px">${lat}${badge(st)}</span></div>`;
+    });
+
+    const gmStatus = gmaps?.available ? "ok" : gmaps?.configured === false ? "unconfigured" : "down";
+    rows.push(`<div class="saglik-satir"><span>Google Maps Platform</span><span>${badge(gmStatus)}</span></div>`);
+    return rows.join("");
+  }
+
   function openSettings() {
     const tema = S.theme || "system";
     const stil = S.mapStyle || "standart";
     const proxy = S.proxyUrl || "";
+    const lang = getLang();
 
     renderBox(`
       <div class="modal-baslik">
-        <h3>${iconSvg("settings", 18)} Görünüm &amp; Ayarlar</h3>
-        <button class="btn ikon" data-modal-kapat aria-label="Kapat">${iconSvg("close", 18)}</button>
+        <h3>${iconSvg("settings", 18)} ${esc(t("settings.title"))}</h3>
+        <button class="btn ikon" data-modal-kapat aria-label="${esc(t("common.close"))}">${iconSvg("close", 18)}</button>
       </div>
 
-      <div class="baslik-satir"><h3>Tema</h3></div>
+      <div class="baslik-satir"><h3>${esc(t("settings.language"))}</h3></div>
+      <div class="segment" id="langSegment">
+        <button data-lang="tr" class="${lang === "tr" ? "aktif" : ""}">Türkçe</button>
+        <button data-lang="en" class="${lang === "en" ? "aktif" : ""}">English</button>
+      </div>
+
+      <div class="baslik-satir"><h3>${esc(t("settings.theme"))}</h3></div>
       <div class="segment" id="temaSegment">
-        <button data-tema="system" class="${tema === "system" ? "aktif" : ""}">Sistem</button>
-        <button data-tema="light" class="${tema === "light" ? "aktif" : ""}">${iconSvg("sun", 15)} Açık</button>
-        <button data-tema="dark" class="${tema === "dark" ? "aktif" : ""}">${iconSvg("moon", 15)} Koyu</button>
+        <button data-tema="system" class="${tema === "system" ? "aktif" : ""}">${esc(t("settings.themeSystem"))}</button>
+        <button data-tema="light" class="${tema === "light" ? "aktif" : ""}">${iconSvg("sun", 15)} ${esc(t("settings.themeLight"))}</button>
+        <button data-tema="dark" class="${tema === "dark" ? "aktif" : ""}">${iconSvg("moon", 15)} ${esc(t("settings.themeDark"))}</button>
       </div>
 
-      <div class="baslik-satir"><h3>Harita Stili</h3></div>
+      <div class="baslik-satir"><h3>${esc(t("settings.mapStyle"))}</h3></div>
       <div class="segment" id="haritaStilSegment">
-        <button data-stil="standart" class="${stil === "standart" ? "aktif" : ""}">Standart</button>
-        <button data-stil="sade" class="${stil === "sade" ? "aktif" : ""}">Sade</button>
-        <button data-stil="osm" class="${stil === "osm" ? "aktif" : ""}">OSM</button>
+        <button data-stil="standart" class="${stil === "standart" ? "aktif" : ""}">${esc(t("settings.styleStandard"))}</button>
+        <button data-stil="sade" class="${stil === "sade" ? "aktif" : ""}">${esc(t("settings.styleClean"))}</button>
+        <button data-stil="osm" class="${stil === "osm" ? "aktif" : ""}">${esc(t("settings.styleOsm"))}</button>
       </div>
 
-      <div class="baslik-satir"><h3>Gelişmiş (İsteğe Bağlı Proxy)</h3></div>
+      <div class="baslik-satir"><h3>${esc(t("settings.providerHealth"))}</h3></div>
+      <div class="kart" id="providerHealthBox" style="margin-bottom:10px">
+        ${renderHealthRows(null, null)}
+      </div>
+
+      <div class="baslik-satir"><h3>${esc(t("settings.proxy"))}</h3></div>
       <div class="kart" style="margin-bottom:10px">
-        <div class="alt">Mobil/Web CORS için özel proxy adresi (boş bırakılabilir)</div>
+        <div class="alt">${esc(t("settings.proxyHint"))}</div>
         <div style="display:flex;gap:8px">
           <input class="giris" id="proxyInput" placeholder="https://ornek.vercel.app/api/proxy" value="${esc(proxy)}">
-          <button class="btn" id="proxyKaydetBtn">Kaydet</button>
+          <button class="btn" id="proxyKaydetBtn">${esc(t("common.save"))}</button>
         </div>
       </div>
 
       <div class="ayar-satir tik" id="cacheTemizleBtn">
         <div class="ayar-bilgi">
-          <span class="ayar-baslik">Önbelleği Temizle</span>
-          <span class="ayar-alt">Kayıtlı hat, durak ve harita önbelleğini sıfırlar</span>
+          <span class="ayar-baslik">${esc(t("settings.clearCache"))}</span>
+          <span class="ayar-alt">${esc(t("settings.clearCacheDesc"))}</span>
         </div>
-        <span class="btn kucuk">${iconSvg("refresh", 14)} Temizle</span>
+        <span class="btn kucuk">${iconSvg("refresh", 14)} ${esc(t("common.clear"))}</span>
       </div>
 
       <div class="kart" style="margin-top:12px">
-        <div class="bas">İstanbul Ulaşım v4.0</div>
-        <div class="alt">Veri Kaynakları: İETT, Metro İstanbul, TCDD Marmaray, Şehir Hatları, İSPARK, İBB Trafik (TKM), Transitous.</div>
+        <div class="bas">İstanbul Ulaşım v5.0</div>
+        <div class="alt">İETT · Metro İstanbul · TCDD Marmaray · Şehir Hatları · İSPARK · TKM · Transitous</div>
       </div>
     `);
+
+    // Populate live provider health asynchronously without blocking modal open
+    Promise.all([
+      typeof DataProvider?.getHealth === "function"
+        ? Promise.resolve().then(() => DataProvider.getHealth()).catch(() => null)
+        : Promise.resolve(null),
+      typeof GoogleMapsService?.checkAvailability === "function" ? GoogleMapsService.checkAvailability().catch(() => null) : Promise.resolve(null),
+    ]).then(([health, gmaps]) => {
+      const box = document.querySelector("#providerHealthBox");
+      if (box) box.innerHTML = renderHealthRows(health, gmaps);
+    });
+
+    document.querySelectorAll("#langSegment button").forEach((b) => {
+      b.addEventListener("click", () => {
+        const nextLang = b.dataset.lang;
+        setLang(nextLang);
+        KV.set("lang", nextLang);
+        openSettings();
+        callbacks.ciz(false);
+      });
+    });
 
     document.querySelectorAll("#temaSegment button").forEach((b) => {
       b.addEventListener("click", () => {
@@ -330,21 +439,21 @@ export function createStopModal(S, mc, callbacks) {
       KV.set("proxyUrl", val);
       if (typeof Bridge.setProxyUrl === "function") Bridge.setProxyUrl(val);
       const btn = document.querySelector("#proxyKaydetBtn");
-      if (btn) btn.textContent = "Kaydedildi ✓";
+      if (btn) btn.textContent = t("common.saved");
     });
 
     document.querySelector("#cacheTemizleBtn")?.addEventListener("click", async () => {
       try {
         if (typeof KV.clear === "function") await KV.clear();
         for (const k of Object.keys(localStorage)) {
-          if (k.startsWith("ulasim.")) localStorage.removeItem(k);
+          if (k.startsWith("ulasim.") && k !== "ulasim.lang") localStorage.removeItem(k);
         }
         if ("caches" in window) {
           const keys = await caches.keys();
           await Promise.all(keys.map((k) => caches.delete(k)));
         }
         const alt = document.querySelector("#cacheTemizleBtn .ayar-alt");
-        if (alt) alt.textContent = "Önbellek temizlendi ✓";
+        if (alt) alt.textContent = t("settings.clearCacheDone");
       } catch {
         // ignore
       }

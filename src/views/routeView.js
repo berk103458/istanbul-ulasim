@@ -1,5 +1,5 @@
 /**
- * İstanbul Ulaşım v4.0 — Rota Planlayıcı (Multi-modal Route Planner & Timeline)
+ * İstanbul Ulaşım v5.0 — Rota Planlayıcı (Web Worker A*, 6-Criteria Scoring, Fare & Delay Alerts)
  */
 import L from "leaflet";
 import { Zaman } from "../core/time.js";
@@ -8,6 +8,8 @@ import { KV } from "../core/storage.js";
 import { API } from "../core/api.js";
 import { Plan } from "../core/router.js";
 import { iconSvg } from "../ui/icons.js";
+import { t } from "../i18n/index.js";
+import { RouteEngine } from "../engines/routeEngine.js";
 import { esc, bas, metre, saat, renkKod, hataMesaji } from "../map/mapController.js";
 
 const TUR_IKON = {
@@ -51,32 +53,46 @@ export function createRouteView(S, mc, callbacks) {
     return z.tabanDk + (d - z.tabanMs) / 60000;
   };
 
-  function agKur() {
+  async function agKur(opts = {}) {
     const s = new Date();
     const dilim = Math.floor((s.getHours() * 60 + s.getMinutes()) / 30);
-    S.ag = Plan.kur({ ...(AG.temel || {}), otobus: AG.otobus, vapur: AG.vapur || [] });
+    const payload = { ...(AG.temel || {}), otobus: AG.otobus, vapur: AG.vapur || [], ...opts };
+    if (typeof RouteEngine?.initGraph === "function") {
+      try {
+        const res = await RouteEngine.initGraph(payload);
+        if (res?.stopLinesIndex) S.stopLinesIndex = res.stopLinesIndex;
+        S.agReady = true;
+      } catch {
+        S.ag = Plan.kur(payload);
+      }
+    } else {
+      S.ag = Plan.kur(payload);
+    }
+    if (S.ag?.duraklar && !S.stopLinesIndex && typeof Plan.buildStopLinesIndex === "function") {
+      S.stopLinesIndex = Plan.buildStopLinesIndex(S.ag);
+    }
     AG.kurulma = Date.now();
     AG.saatDilimi = dilim;
-    return S.ag;
+    return S.ag || { workerReady: true };
   }
 
   function agHazirla() {
     if (agYukleniyor) {
-      return agYukleniyor.then(() => {
+      return agYukleniyor.then(async () => {
         const s = new Date();
-        if (Math.floor((s.getHours() * 60 + s.getMinutes()) / 30) !== AG.saatDilimi) agKur();
+        if (Math.floor((s.getHours() * 60 + s.getMinutes()) / 30) !== AG.saatDilimi) await agKur();
         return S.ag;
       });
     }
     agYukleniyor = (async () => {
       AG.temel = await API.ag.temel();
-      agKur();
+      await agKur();
       API.vapur
         .tumu()
-        .then((v) => {
+        .then(async (v) => {
           AG.vapur = v;
           S.agVapur = true;
-          agKur();
+          await agKur();
           if (S.rota.sonuclar && callbacks.sayfa().tur === "rota") rotaBul(true);
         })
         .catch(() => {});
@@ -86,10 +102,10 @@ export function createRouteView(S, mc, callbacks) {
           AG.indirme = { bitti, toplam };
           if (callbacks.sayfa().tur === "rota") callbacks.panelYenile();
         })
-        .then((ob) => {
+        .then(async (ob) => {
           AG.otobus = ob;
           AG.indirme = null;
-          agKur();
+          await agKur();
           if (callbacks.sayfa().tur === "rota") {
             if (S.rota.sonuclar) rotaBul(true);
             else callbacks.panelYenile();
@@ -398,8 +414,7 @@ export function createRouteView(S, mc, callbacks) {
 
       let ag = await agHazirla();
       if (ileri) {
-        ag = Plan.kur({ ...(AG.temel || {}), otobus: AG.otobus, vapur: AG.vapur || [], saat: tabanDk, gun: taban.getDay() });
-        S.ag = ag;
+        ag = await agKur({ saat: tabanDk, gun: taban.getDay() });
         AG.saatDilimi = null;
       }
 
@@ -411,21 +426,35 @@ export function createRouteView(S, mc, callbacks) {
 
       let sonuc = [];
       let etiketler = null;
-      for (let tur = 0; tur < 4; tur++) {
-        ({ sonuc, etiketler } = Plan.alternatifler(ag, a, b, t0, { bekleme: seferBekleme }, 7));
-        sonuc = Plan.direkler(ag, a, b, t0, { bekleme: seferBekleme }).concat(sonuc);
-        const yeni = [...new Set(sonuc.flatMap((r) => r.bacaklar.filter((x) => x.iett).map((x) => x.hat)))].filter(
-          (h) => !SEFER.has(gunTipiPlan() + "|" + h)
-        );
-        if (!yeni.length) break;
-        R.durum = `Sefer saatleri kontrol ediliyor: ${yeni.join(", ")}…`;
-        if (!sessiz) callbacks.ciz();
-        await Promise.all(yeni.map(seferHazirla));
-        if (no !== rotaNo) return;
+      if (typeof RouteEngine?.compute === "function") {
+        try {
+          const workerRes = await RouteEngine.compute(a, b, t0, {}, 7);
+          if (workerRes && Array.isArray(workerRes.sonuc)) {
+            sonuc = workerRes.sonuc;
+            etiketler = workerRes.etiketler || null;
+          }
+        } catch {
+          sonuc = [];
+        }
+      }
+
+      if (!sonuc.length && ag?.duraklar) {
+        for (let tur = 0; tur < 4; tur++) {
+          ({ sonuc, etiketler } = Plan.alternatifler(ag, a, b, t0, { bekleme: seferBekleme }, 7));
+          sonuc = Plan.direkler(ag, a, b, t0, { bekleme: seferBekleme }).concat(sonuc);
+          const yeni = [...new Set(sonuc.flatMap((r) => r.bacaklar.filter((x) => x.iett).map((x) => x.hat)))].filter(
+            (h) => !SEFER.has(gunTipiPlan() + "|" + h)
+          );
+          if (!yeni.length) break;
+          R.durum = `Sefer saatleri kontrol ediliyor: ${yeni.join(", ")}…`;
+          if (!sessiz) callbacks.ciz();
+          await Promise.all(yeni.map(seferHazirla));
+          if (no !== rotaNo) return;
+        }
       }
 
       let adaylar = sonuc.slice();
-      if (!AG.otobus) {
+      if (!AG.otobus && ag?.duraklar) {
         const yakinDurak = (pt) => Plan.yakinDuraklar(ag, pt, 8000, 60);
         const uzak = (pt) => Plan.yurume(yakinDurak(pt)[0]?.[1] ?? 1e9) > 10;
         const adaylar3 = (pt, f = () => true) => {
@@ -562,6 +591,17 @@ export function createRouteView(S, mc, callbacks) {
       return callbacks.ciz();
     }
     yerAramaZaman = setTimeout(async () => {
+      if (typeof RouteEngine?.searchPlaces === "function") {
+        try {
+          const list = await RouteEngine.searchPlaces(q, S.ben, S.ag);
+          if (no !== yerAramaNo) return;
+          R.oneriler = list || [];
+          callbacks.ciz();
+          return;
+        } catch {
+          // fallback below
+        }
+      }
       const yerel = S.ag ? Plan.yerAra(S.ag, q, 8) : [];
       R.oneriler = yerel;
       callbacks.ciz();
@@ -653,13 +693,50 @@ export function createRouteView(S, mc, callbacks) {
     if (R.nereden && R.nereye) rotaBul();
   }
 
+  function routeFare(r) {
+    if (r._fare) return r._fare;
+    if (typeof Plan.ucretHesapla === "function") {
+      try {
+        const f = Plan.ucretHesapla(r);
+        r._fare = {
+          tam: Number(f?.tamTL ?? f?.tam ?? 27),
+          ogrenci: Number(f?.ogrenciTL ?? f?.ogrenci ?? 13.18),
+          ucretsizAktarma: Boolean(f?.ucretsizAktarma),
+        };
+        return r._fare;
+      } catch {
+        // fallback below
+      }
+    }
+    const transitLegs = (r.bacaklar || []).filter((b) => b.tur !== "yuru").length;
+    const tam = Number((transitLegs * 27).toFixed(2));
+    const ogrenci = Number((transitLegs * 13.18).toFixed(2));
+    r._fare = { tam, ogrenci, ucretsizAktarma: false };
+    return r._fare;
+  }
+
   function filtreleSirala(sonuclar, filtre) {
     const gecerli = (sonuclar || []).filter((r) => !r.gecersiz);
     const gecersiz = (sonuclar || []).filter((r) => r.gecersiz);
     const kopya = gecerli.slice();
-    if (filtre === "hizli") kopya.sort((a, b) => a.sure - b.sure);
-    else if (filtre === "az_aktarma") kopya.sort((a, b) => a.aktarma - b.aktarma || a.sure - b.sure);
-    else if (filtre === "az_yuru") kopya.sort((a, b) => a.yurumeM - b.yurumeM || a.sure - b.sure);
+    const ti = mc.getTrafikIndeks?.()?.TI ?? 45;
+    const trafficFactor = 1 + Math.max(0, (ti - 40) / 100);
+
+    if (typeof Plan.puanla === "function" && filtre !== "onerilen") {
+      kopya.sort((a, b) => Plan.puanla(a, filtre, trafficFactor) - Plan.puanla(b, filtre, trafficFactor));
+      return kopya.concat(gecersiz);
+    }
+
+    const waitMin = (r) => (r.bacaklar || []).reduce((s, b) => s + (b.bekleme || 0), 0);
+    const roadShare = (r) =>
+      (r.bacaklar || []).filter((b) => b.tur === "otobus").reduce((s, b) => s + (b.varis - b.kalkis), 0);
+
+    if (filtre === "fastest" || filtre === "hizli") kopya.sort((a, b) => a.sure - b.sure);
+    else if (filtre === "fewest_transfers" || filtre === "az_aktarma") kopya.sort((a, b) => a.aktarma - b.aktarma || a.sure - b.sure);
+    else if (filtre === "least_walking" || filtre === "az_yuru") kopya.sort((a, b) => a.yurumeM - b.yurumeM || a.sure - b.sure);
+    else if (filtre === "least_waiting") kopya.sort((a, b) => waitMin(a) - waitMin(b) || a.sure - b.sure);
+    else if (filtre === "cheapest") kopya.sort((a, b) => routeFare(a).tam - routeFare(b).tam || a.sure - b.sure);
+    else if (filtre === "traffic_resilient") kopya.sort((a, b) => roadShare(a) - roadShare(b) || a.sure - b.sure);
     return kopya.concat(gecersiz);
   }
 
@@ -686,8 +763,8 @@ export function createRouteView(S, mc, callbacks) {
     if (r.gecersiz) {
       return `
         <div class="kart" style="opacity:.55">
-          <div class="bas"><span class="sure tarife">Sefer Yok</span>${zincirHTML(r)}</div>
-          <div class="alt">O saatte kullanılamaz: ${esc(r.gecersiz)}.</div>
+          <div class="bas"><span class="sure tarife">${esc(t("route.noService"))}</span>${zincirHTML(r)}</div>
+          <div class="alt">${esc(r.gecersiz)}</div>
         </div>`;
     }
     const ilkBinis = r.bacaklar.find((b) => b.tur !== "yuru");
@@ -696,8 +773,9 @@ export function createRouteView(S, mc, callbacks) {
     const gece = ilkBinis && cikis - r.kalkis > 40;
     const yolculuk = r.varis - (gece ? cikis : r.kalkis);
     const ilkB = r.bacaklar.find((x) => x.tur !== "yuru");
+    const fare = routeFare(r);
     const canli = r.canli
-      ? `<div class="alt">${ilkB?.kaynak === "canlı" ? '<span class="canli">CANLI</span>' : iconSvg("clock", 13)} ${esc(r.canli)}</div>`
+      ? `<div class="alt">${ilkB?.kaynak === "canlı" ? `<span class="canli">${esc(t("common.live"))}</span>` : iconSvg("clock", 13)} ${esc(r.canli)}</div>`
       : "";
 
     return `
@@ -707,8 +785,13 @@ export function createRouteView(S, mc, callbacks) {
           <span class="sure ${i === 0 && !gece ? "yakin" : ""}">${gece ? saat(cikis) : Math.round(r.sure) + " dk"}</span>
         </div>
         <div class="alt">
-          ${gece ? `Şu an sefer yok · <b style="color:var(--yazi)">${saat(cikis)}</b> çıkış · ${Math.round(yolculuk)} dk · ` : `${saat(r.kalkis)} → `}
-          <b style="color:var(--yazi)">${saat(r.varis)}</b> varış · ${metre(r.yurumeM)} yürüme · ${r.aktarma ? `${r.aktarma} aktarma` : `<b style="color:var(--iyi)">aktarmasız</b>`}
+          ${gece ? `<b style="color:var(--yazi)">${saat(cikis)}</b> · ${Math.round(yolculuk)} dk · ` : `${saat(r.kalkis)} → `}
+          <b style="color:var(--yazi)">${saat(r.varis)}</b> ${esc(t("route.arrival"))} · ${esc(t("route.walkM", { m: metre(r.yurumeM) }))} · ${r.aktarma ? esc(t("route.transfers", { n: r.aktarma })) : `<b style="color:var(--iyi)">${esc(t("route.direct"))}</b>`}
+        </div>
+        <div class="alt" style="gap:6px;flex-wrap:wrap">
+          <span>${esc(t("route.fareFull", { tl: fare.tam.toFixed(2) }))}</span>
+          <span>· ${esc(t("route.fareStudent", { tl: fare.ogrenci.toFixed(2) }))}</span>
+          ${fare.ucretsizAktarma ? `<span class="durum-rozet iyi">${esc(t("route.freeTransfer"))}</span>` : ""}
         </div>
         ${canli}
       </div>`;
@@ -796,29 +879,48 @@ export function createRouteView(S, mc, callbacks) {
     }
 
     if (R.nereden && R.nereye && !R.aktif) {
-      html += `<button class="btn birincil" style="width:100%;margin-bottom:10px" data-rotabul>${iconSvg("rota", 18)} Rota Bul</button>`;
+      html += `<button class="btn birincil" style="width:100%;margin-bottom:10px" data-rotabul>${iconSvg("rota", 18)} ${esc(t("route.findBtn"))}</button>`;
       if (R.durum) html += `<div class="alt" style="margin-bottom:8px">${esc(R.durum)}</div>`;
       if (R.sonuclar) {
         const filtre = R.filtre || "onerilen";
+        const criteriaKeys = [
+          "onerilen",
+          "fastest",
+          "fewest_transfers",
+          "least_walking",
+          "least_waiting",
+          "cheapest",
+          "traffic_resilient",
+        ];
         html += `
           <div class="cip-satir" aria-label="Rota Sıralama">
-            <button class="cip ${filtre === "onerilen" ? "aktif" : ""}" data-rfiltre="onerilen">Önerilen</button>
-            <button class="cip ${filtre === "hizli" ? "aktif" : ""}" data-rfiltre="hizli">En Hızlı</button>
-            <button class="cip ${filtre === "az_aktarma" ? "aktif" : ""}" data-rfiltre="az_aktarma">Az Aktarma</button>
-            <button class="cip ${filtre === "az_yuru" ? "aktif" : ""}" data-rfiltre="az_yuru">Az Yürüme</button>
+            ${criteriaKeys
+              .map(
+                (k) =>
+                  `<button class="cip ${filtre === k ? "aktif" : ""}" data-rfiltre="${k}">${esc(t(`route.criteria.${k}`))}</button>`
+              )
+              .join("")}
           </div>`;
 
         const sirali = filtreleSirala(R.sonuclar, filtre);
         R.gosterilenSonuclar = sirali;
 
+        const gecerliler = sirali.filter((x) => !x.gecersiz);
+        if (gecerliler.length > 1) {
+          const minDk = Math.round(Math.min(...gecerliler.map((x) => x.sure)));
+          const minTr = Math.min(...gecerliler.map((x) => x.aktarma || 0));
+          const minTl = Math.min(...gecerliler.map((x) => routeFare(x).tam)).toFixed(2);
+          html += `<div class="karsilastirma-serit">${esc(t("route.compareStrip", { min: minDk, tr: minTr, tl: minTl }))}</div>`;
+        }
+
         if (!sirali.length) {
-          html += `<div class="bos">Uygun rota bulunamadı.</div>`;
+          html += `<div class="bos">${esc(t("route.noResults"))}</div>`;
         } else {
           html += `<div class="liste">${sirali.map((r, i) => rotaKart(r, i)).join("")}</div>`;
         }
       }
     } else if (!R.aktif) {
-      html += `<div class="alt">Gitmek istediğiniz yeri yazın, Ev/İş seçin ya da haritadan dokunun.</div>`;
+      html += `<div class="alt">${esc(t("route.emptyHint"))}</div>`;
     }
 
     return html;
@@ -861,9 +963,33 @@ export function createRouteView(S, mc, callbacks) {
       mc.canliTur();
     }
 
-    const paylasBtn = `<button class="btn kucuk" data-rota-paylas="${p.i}">${iconSvg("share", 14)} Paylaş</button>`;
-    let html = callbacks.baslikHTML(`${Math.round(r.sure)} dk · ${saat(r.varis)} varış`, true, paylasBtn);
-    html += `<div style="margin-bottom:10px">${zincirHTML(r)}</div>`;
+    let delayBanner = "";
+    if (typeof RouteEngine?.checkRouteDelays === "function") {
+      try {
+        const delayRes = await RouteEngine.checkRouteDelays(r);
+        if (delayRes && (delayRes.hasDisruption || delayRes.hasHeavyDelay || delayRes.warnings?.length)) {
+          const msg = delayRes.message || delayRes.warnings?.[0] || t("route.disruptionTitle");
+          delayBanner = `
+            <div class="uyari-banner">
+              <span>${iconSvg("alert", 15)} <span>${esc(msg)}</span></span>
+              <button class="btn kucuk birincil" data-rotabul-alt>${iconSvg("refresh", 13)} ${esc(t("route.recalcAlt"))}</button>
+            </div>`;
+        }
+      } catch {
+        // ignore delay check failure
+      }
+    }
+
+    const fare = routeFare(r);
+    const paylasBtn = `<button class="btn kucuk" data-rota-paylas="${p.i}">${iconSvg("share", 14)} ${esc(t("common.share"))}</button>`;
+    let html = callbacks.baslikHTML(`${Math.round(r.sure)} dk · ${saat(r.varis)} ${esc(t("route.arrival"))}`, true, paylasBtn);
+    html += `<div style="margin-bottom:8px">${zincirHTML(r)}</div>`;
+    html += `<div class="alt" style="margin-bottom:10px;gap:6px;flex-wrap:wrap">
+      <span>${esc(t("route.fareFull", { tl: fare.tam.toFixed(2) }))}</span>
+      <span>· ${esc(t("route.fareStudent", { tl: fare.ogrenci.toFixed(2) }))}</span>
+      ${fare.ucretsizAktarma ? `<span class="durum-rozet iyi">${esc(t("route.freeTransfer"))}</span>` : ""}
+    </div>`;
+    html += delayBanner;
     html += `<div class="kart">`;
 
     r.bacaklar.forEach((b, i) => {

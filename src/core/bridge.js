@@ -108,7 +108,14 @@ export const Bridge = {
     }
 
     // Web / Node / PWA
-    if (rt === "node" || isDirectCorsHost(url)) {
+    if (rt === "node") {
+      return fetchWithTimeout(url, {
+        method,
+        headers: { "User-Agent": "IstanbulUlasim/5.0", ...headers },
+        body: body != null ? body : undefined,
+      });
+    }
+    if (isDirectCorsHost(url)) {
       return fetchWithTimeout(url, { method, headers, body: body != null ? body : undefined });
     }
 

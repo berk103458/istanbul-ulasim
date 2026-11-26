@@ -1,4 +1,7 @@
-// Shared SSRF-safe allowlisted CORS proxy + in-memory TTL cache
+import { sharedCache } from "./cacheLayer.js";
+import { gateway } from "./apiGateway.js";
+
+// Shared SSRF-safe allowlisted CORS proxy + 2-tier cache + request coalescing + circuit breaker
 const ALLOWED_HOSTS = new Set([
   "api.ibb.gov.tr",
   "sehirhatlari.istanbul",
@@ -7,9 +10,7 @@ const ALLOWED_HOSTS = new Set([
   "api.transitous.org",
 ]);
 
-const DEFAULT_UA = "Mozilla/5.0 (Linux; Android 14; Mobile) IstanbulUlasim/4.0";
-const memCache = new Map();
-const MAX_CACHE_ITEMS = 250;
+const DEFAULT_UA = "Mozilla/5.0 (Linux; Android 14; Mobile) IstanbulUlasim/5.0";
 
 export function isAllowedUrl(rawUrl) {
   try {
@@ -24,8 +25,9 @@ export function isAllowedUrl(rawUrl) {
 export function getCacheTtlSeconds(url, body = "") {
   const lower = String(url).toLowerCase();
   const bodyStr = String(body || "");
-  if (lower.includes("gethatotokonum") || bodyStr.includes("GetHatOtoKonum")) return 4;
-  if (lower.includes("segmentdata") || lower.includes("trafficindex")) return 30;
+  if (lower.includes("gethatotokonum") || bodyStr.includes("GetHatOtoKonum")) return 5;
+  if (lower.includes("getfiloarackonum") || bodyStr.includes("GetFiloAracKonum")) return 6;
+  if (lower.includes("segmentdata") || lower.includes("trafficindex") || lower.includes("currentannouncement")) return 30;
   if (lower.includes("getduyurular") || bodyStr.includes("GetDuyurular")) return 180;
   if (lower.includes("ispark/park")) return 120;
   if (lower.includes("sehirhatlari.istanbul")) return 600;
@@ -41,28 +43,6 @@ export function getCacheTtlSeconds(url, body = "") {
     return 600;
   }
   return 0;
-}
-
-function getCached(key) {
-  const entry = memCache.get(key);
-  if (!entry) return null;
-  if (Date.now() > entry.expiresAt) {
-    memCache.delete(key);
-    return null;
-  }
-  return entry;
-}
-
-function setCached(key, data, ttlSec) {
-  if (ttlSec <= 0) return;
-  if (memCache.size >= MAX_CACHE_ITEMS) {
-    const firstKey = memCache.keys().next().value;
-    if (firstKey !== undefined) memCache.delete(firstKey);
-  }
-  memCache.set(key, {
-    ...data,
-    expiresAt: Date.now() + ttlSec * 1000,
-  });
 }
 
 export async function handleProxyRequest({ url, method = "GET", headers = {}, body = null }) {
@@ -83,18 +63,36 @@ export async function handleProxyRequest({ url, method = "GET", headers = {}, bo
     };
   }
 
+  const provider = gateway.detectProvider(url);
   const cacheKey = `${upperMethod}:${url}:${body ? String(body) : ""}`;
   const ttlSec = getCacheTtlSeconds(url, body);
-  const hit = ttlSec > 0 ? getCached(cacheKey) : null;
-  if (hit) {
+
+  const hit = ttlSec > 0 ? await sharedCache.getWithRedisFallback(cacheKey, { allowStale: true }) : null;
+  if (hit && !hit.stale) {
+    gateway.recordRequestLatency(0.1, false);
     return {
-      status: hit.status,
+      status: hit.value.status,
       headers: {
-        "Content-Type": hit.contentType,
+        "Content-Type": hit.value.contentType,
         "Cache-Control": `public, max-age=${ttlSec}, s-maxage=${ttlSec}`,
         "X-Proxy-Cache": "HIT",
       },
-      text: hit.text,
+      text: hit.value.text,
+    };
+  }
+
+  if (gateway.isCircuitOpen(provider)) {
+    if (hit) {
+      return {
+        status: hit.value.status,
+        headers: { "Content-Type": hit.value.contentType, "X-Proxy-Cache": "STALE-FAILOVER" },
+        text: hit.value.text,
+      };
+    }
+    return {
+      status: 503,
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+      text: JSON.stringify({ error: `Provider ${provider} circuit open` }),
     };
   }
 
@@ -108,38 +106,57 @@ export async function handleProxyRequest({ url, method = "GET", headers = {}, bo
     }
   }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 25000);
-  try {
-    const res = await fetch(url, {
-      method: upperMethod,
-      headers: safeHeaders,
-      body: upperMethod === "POST" && body != null ? String(body) : undefined,
-      signal: controller.signal,
-    });
-    const text = await res.text();
-    const contentType = res.headers.get("content-type") || "text/plain; charset=utf-8";
-    if (res.status >= 200 && res.status < 400 && ttlSec > 0) {
-      setCached(cacheKey, { status: res.status, contentType, text }, ttlSec);
+  return gateway.coalesce(cacheKey, async () => {
+    const t0 = performance.now();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 25000);
+    try {
+      const res = await fetch(url, {
+        method: upperMethod,
+        headers: safeHeaders,
+        body: upperMethod === "POST" && body != null ? String(body) : undefined,
+        signal: controller.signal,
+      });
+      const text = await res.text();
+      const contentType = res.headers.get("content-type") || "text/plain; charset=utf-8";
+      const ms = performance.now() - t0;
+
+      if (res.status >= 200 && res.status < 400) {
+        gateway.recordSuccess(provider, ms);
+        if (ttlSec > 0) {
+          sharedCache.set(cacheKey, { status: res.status, contentType, text }, ttlSec);
+        }
+      } else {
+        gateway.recordFailure(provider, ms);
+      }
+
+      return {
+        status: res.status,
+        headers: {
+          "Content-Type": contentType,
+          "Cache-Control": ttlSec > 0 ? `public, max-age=${ttlSec}, s-maxage=${ttlSec}` : "no-store",
+          "X-Proxy-Cache": "MISS",
+        },
+        text,
+      };
+    } catch (err) {
+      gateway.recordFailure(provider, performance.now() - t0);
+      if (hit) {
+        return {
+          status: hit.value.status,
+          headers: { "Content-Type": hit.value.contentType, "X-Proxy-Cache": "STALE-FAILOVER" },
+          text: hit.value.text,
+        };
+      }
+      return {
+        status: 502,
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+        text: JSON.stringify({ error: String(err?.message || err) }),
+      };
+    } finally {
+      clearTimeout(timer);
     }
-    return {
-      status: res.status,
-      headers: {
-        "Content-Type": contentType,
-        "Cache-Control": ttlSec > 0 ? `public, max-age=${ttlSec}, s-maxage=${ttlSec}` : "no-store",
-        "X-Proxy-Cache": "MISS",
-      },
-      text,
-    };
-  } catch (err) {
-    return {
-      status: 502,
-      headers: { "Content-Type": "application/json; charset=utf-8" },
-      text: JSON.stringify({ error: String(err?.message || err) }),
-    };
-  } finally {
-    clearTimeout(timer);
-  }
+  });
 }
 
 export const CORS_HEADERS = {
