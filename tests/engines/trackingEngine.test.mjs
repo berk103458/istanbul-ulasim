@@ -102,18 +102,15 @@ describe("TrackingEngine.clusterVehicles", () => {
     assert.deepEqual(TrackingEngine.clusterVehicles([], 10), []);
     assert.deepEqual(TrackingEngine.clusterVehicles(null, 10), []);
     assert.deepEqual(TrackingEngine.clusterVehicles(undefined, 10), []);
-    // geçersiz koordinatlı atlanır (zoom<14); zoom>=14 dalı ham geçirir
     const bad = [{ lat: 41.0, lon: 29.0 }, null, { lat: NaN, lon: 1 }, {}, { lat: 41.0001, lon: 29.0001 }];
     const clustered = TrackingEngine.clusterVehicles(bad, 10);
     assert.ok(!clustered.some((o) => o.type === "single" && (o.bus == null || !Number.isFinite(o.bus.lat))));
   });
 
-  test("BOZUK VERİ: zoom>=14 + bounds=null → geçersiz kayıtlar tekil olarak geçer", () => {
-    // filterVisibleVehicles atlanır (bounds null); zoom>=14 dalı `visible.map` ham
+  test("zoom>=14 + bounds=null → yalnızca geçerli araçlar tekil işaretçi olur", () => {
     const bad = [{ lat: 41.0, lon: 29.0 }, null, { lat: NaN, lon: 1 }];
     const out = TrackingEngine.clusterVehicles(bad, 14, null);
-    assert.ok(out.some((o) => o.type === "single" && o.bus == null), "null araç geçiyor");
-    assert.ok(out.some((o) => o.type === "single" && o.bus && !Number.isFinite(o.bus.lat)), "NaN araç geçiyor");
+    assert.deepEqual(out, [{ type: "single", bus: bad[0] }]);
   });
 
   test("varsayılan zoom=14", () => {

@@ -27,7 +27,7 @@ function stubNotification(t, permission = "granted") {
 }
 
 describe("NotificationEngine.watchStopBus / unwatch / getWatches", () => {
-  test("watch id; normalizasyon hat upper + trim; threshold Math.max(1,Number||3)", async (t) => {
+  test("watch id, hat normalizasyonu ve bildirim eşiği", async (t) => {
     freezeTime(t, FIXED_MS);
     const N = await freshNotify();
     const id = N.watchStopBus(" 500 ", "  Kadıköy ", 5);
@@ -39,10 +39,12 @@ describe("NotificationEngine.watchStopBus / unwatch / getWatches", () => {
     assert.equal(w.createdAt, FIXED_MS, "zaman sabit");
     // threshold
     const thr = (...args) => { const id = N.watchStopBus(...args); return N.getWatches().find((x) => x.id === id).thresholdMin; };
-    // NOT: Math.max(1, Number(thresholdMin)||3) → `0||3`=3 (0→3!), negatif→1
-    assert.equal(thr("M2", "x", 0), 3, "thresholdMin=0 → `0||3`=3 (min-1 değil)");
+    assert.equal(thr("M2", "x", 0), 1, "eşik alt sınırı 1 dakika");
+    assert.equal(thr("M2", "x", "0"), 1);
     assert.equal(thr("M2", "x", -5), 1, "negatif → Math.max(1,..)=1");
     assert.equal(thr("M2", "x", "x"), 3, "NaN→3");
+    assert.equal(thr("M2", "x", " "), 3, "boş eşik → varsayılan 3");
+    assert.equal(thr("M2", "x", Infinity), 3, "sonsuz eşik → varsayılan 3");
     assert.equal(thr("M2", "x"), 3, "varsayılan 3");
     assert.equal(thr("M2", "x", 2.5), 2.5);
   });
@@ -82,8 +84,8 @@ describe("NotificationEngine.checkEtas", () => {
     // imminent değil
     N.checkEtas("500", "Kadıköy", [{ dakika: 10 }]);
     assert.equal(Fake.created.length, 0);
-    // imminent + eşleşme (durak küçük/büyük harf)
-    N.checkEtas("500", "kadıköy", [{ dakika: 2, plaka: "34 X 1" }]);
+    // Durak adı boşluk ve harf farkına rağmen eşleşir.
+    N.checkEtas("500", " kadıköy ", [{ dakika: 2, plaka: "34 X 1" }]);
     assert.equal(Fake.created.length, 1, "web bildirimi");
     assert.ok(Fake.created[0].title.includes("500"));
     assert.ok(Fake.created[0].title.includes("2 dk"));

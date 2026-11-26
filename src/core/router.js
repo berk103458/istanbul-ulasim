@@ -146,7 +146,10 @@ export const Plan = (() => {
       return m && yok.has(m[1]);
     });
 
+  const dizi = (deger) => Array.isArray(deger) ? deger : [];
+
   function kur(g) {
+    g ??= {};
     const duraklar = [];
     const idx = new Map();
     const desenler = [];
@@ -158,23 +161,25 @@ export const Plan = (() => {
       idx.set(key, i);
       return i;
     };
-    const gun = g.gun ?? new Date().getDay();
-    const saat = g.saat ?? Zaman.simdi();
+    const gun = Number.isFinite(g.gun) ? g.gun : new Date().getDay();
+    const saat = Number.isFinite(g.saat) ? g.saat : Zaman.simdi();
 
     // Raylı sistem
-    const hatById = new Map((g.hatlar || []).map((h) => [h.id, h]));
+    const hatById = new Map();
+    for (const h of dizi(g.hatlar)) {
+      if (h?.id != null && typeof h.ad === "string" && h.ad.trim()) hatById.set(h.id, h);
+    }
     const hatIst = new Map();
-    for (const s of g.istasyonlar || []) {
-      if (!s.lat || !s.lon) continue;
+    for (const s of dizi(g.istasyonlar)) {
+      if (!Core.gecerliKonum(s) || s.id == null || !hatById.has(s.hatId)) continue;
       (hatIst.get(s.hatId) || hatIst.set(s.hatId, []).get(s.hatId)).push(s);
     }
     for (const [hatId, liste] of hatIst) {
       const h = hatById.get(hatId);
-      if (!h) continue;
       liste.sort((a, b) => a.sira - b.sira);
       const tur = turOf(h.ad);
       const di = liste.map((s) =>
-        ekle("m:" + s.id, { ad: s.ad, lat: s.lat, lon: s.lon, tur, hat: h.ad, istId: s.id, hatId })
+        ekle("m:" + s.id, { ad: s.ad, lat: s.lat, lon: s.lon, tur, hat: h.ad, istId: s.id, hatId, kod: s.kod })
       );
       const sure = (a, b) =>
         Math.max(
@@ -207,7 +212,7 @@ export const Plan = (() => {
     }
 
     // Marmaray
-    if (g.marmaray !== false && (g.hatlar || g.otobus)) {
+    if (g.marmaray !== false && (Array.isArray(g.hatlar) || Array.isArray(g.otobus?.hatlar))) {
       const di = MARMARAY.map(([ad, lat, lon]) =>
         ekle("r:" + ad, { ad, lat, lon, tur: "marmaray", hat: "Marmaray" })
       );
@@ -250,17 +255,18 @@ export const Plan = (() => {
 
     // İETT otobüs + metrobüs
     const ob = g.otobus;
-    if (ob && ob.hatlar && ob.hatlar.length) {
+    const otobusHatlari = dizi(ob?.hatlar).filter((h) => h?.kod != null && h.kod !== "");
+    if (otobusHatlari.length) {
       const hiz = otobusHiz(saat, gun);
       const durakIdx = (kod) => {
-        const d = ob.duraklar[kod];
-        if (!d) return -1;
+        const d = ob.duraklar?.[kod];
+        if (!Array.isArray(d) || !Number.isFinite(d[0]) || !Number.isFinite(d[1])) return -1;
         return ekle("b:" + kod, { ad: bas(d[2]), lat: d[0], lon: d[1], tur: "otobus", kod });
       };
-      for (const h of ob.hatlar) {
+      for (const h of otobusHatlari) {
         const mb = !!h.mb;
         for (const [yon, kodlar] of Object.entries(h.yon || {})) {
-          const di = kodlar.map(durakIdx).filter((x) => x >= 0);
+          const di = dizi(kodlar).map(durakIdx).filter((x) => x >= 0);
           if (di.length < 2) continue;
           const t = [0];
           for (let k = 1; k < di.length; k++) {
@@ -280,7 +286,7 @@ export const Plan = (() => {
             renk: mb ? METROBUS_RENK : null,
             d: di,
             t,
-            aralik: h.aralik || (mb ? 3 : otobusAralik(saat)),
+            aralik: Number.isFinite(h.aralik) && h.aralik > 0 ? h.aralik : (mb ? 3 : otobusAralik(saat)),
             ad: duraklar[di[di.length - 1]].ad,
             iett: true,
             yon,
@@ -288,8 +294,9 @@ export const Plan = (() => {
         }
       }
     } else if (g.metrobus) {
-      for (const [yon, l] of Object.entries(g.metrobus)) {
-        if (!l || l.length < 2) continue;
+      for (const [yon, durakListesi] of Object.entries(g.metrobus)) {
+        const l = dizi(durakListesi).filter((d) => Core.gecerliKonum(d) && d.kod != null && d.kod !== "");
+        if (l.length < 2) continue;
         const di = l.map((d) =>
           ekle("b:" + d.kod, { ad: bas(d.ad), lat: d.lat, lon: d.lon, tur: "mb", kod: d.kod })
         );
@@ -312,9 +319,10 @@ export const Plan = (() => {
 
     // Vapur
     const iskeleBul = new Map();
-    for (const p of (g.iskeleler || []).concat(EK_ISKELE)) {
+    for (const p of dizi(g.iskeleler).concat(EK_ISKELE)) {
+      if (!Core.gecerliKonum(p) || typeof p.ad !== "string") continue;
       const n = norm(p.ad);
-      if (!iskeleBul.has(n)) iskeleBul.set(n, p);
+      if (n && !iskeleBul.has(n)) iskeleBul.set(n, p);
     }
     const iskele = (ad) => {
       let n = norm(ad);
@@ -333,27 +341,31 @@ export const Plan = (() => {
       });
     };
     let sId = 0;
-    for (const vh of g.vapur || []) {
-      const uclar = String(vh.ad || "")
+    for (const vh of dizi(g.vapur)) {
+      if (typeof vh?.ad !== "string" || !vh.ad.trim()) continue;
+      const uclar = vh.ad
         .split(/\s+-\s+|-/)
         .map((x) => x.replace(/HATTI$/i, "").trim())
         .filter(Boolean);
-      for (const tb of vh.tablolar || []) {
-        if (!tabloGunUygun(tb.not, gun)) continue;
-        const yok = bugunYapilmayanIsaretler(tb.not, gun);
-        const sutun = (tb.basliklar || []).find(
-          (r) => r.length > 1 && !r.every((c) => /Kalkış|Varış/i.test(c))
+      for (const tb of dizi(vh.tablolar)) {
+        if (!Array.isArray(tb?.satirlar)) continue;
+        const not = typeof tb.not === "string" ? tb.not : "";
+        if (!tabloGunUygun(not, gun)) continue;
+        const yok = bugunYapilmayanIsaretler(not, gun);
+        const sutun = dizi(tb.basliklar).find(
+          (r) => Array.isArray(r) && r.length > 1 && !r.every((c) => /Kalkış|Varış/i.test(c))
         );
         let sutunIdx;
         if (sutun) sutunIdx = sutun.map(iskele);
         else {
-          const b0 = (tb.baslik || "").split("|")[0].trim();
+          const b0 = typeof tb.baslik === "string" ? tb.baslik.split("|")[0].trim() : "";
+          if (!b0) continue;
           const diger = uclar.find((u) => norm(u) !== norm(b0)) || "";
           sutunIdx = [iskele(b0), iskele(diger)];
         }
         if (sutunIdx.filter((x) => x >= 0).length < 2) continue;
-        for (const r of tb.satirlar || []) {
-          if (satirYok(r, yok)) continue;
+        for (const r of tb.satirlar) {
+          if (!Array.isArray(r) || satirYok(r, yok)) continue;
           const d = [];
           const t = [];
           if (!sutun) {
@@ -428,7 +440,7 @@ export const Plan = (() => {
       izg,
       G,
       hk,
-      otobusHatSayisi: ob?.hatlar?.length || 0,
+      otobusHatSayisi: otobusHatlari.length,
     };
   }
 
@@ -1059,7 +1071,7 @@ export const Plan = (() => {
   }
 
   /**
-   * Builds an inverted index mapping every bus/metrobus stop code to all passing line codes.
+   * Builds an inverted index mapping each coded stop to all passing line codes.
    * Enables <1ms Stop Departure Board lookups.
    * @param {object} ag
    * @returns {Object<string, string[]>}

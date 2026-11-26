@@ -181,6 +181,13 @@ async function runTests() {
     timeout: 60000,
   });
 
+  console.log("5. Engine tests...");
+  execFileSync(process.execPath, ["--test", "tests/engines/"], {
+    cwd: root,
+    stdio: "inherit",
+    timeout: 60000,
+  });
+
   console.log("ALL VERIFICATION CHECKS PASSED!");
 }
 

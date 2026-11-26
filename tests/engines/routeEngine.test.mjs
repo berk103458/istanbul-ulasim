@@ -38,7 +38,7 @@ describe("RouteEngine.initGraph", () => {
     assert.equal(Object.keys(res.stopLinesIndex).length, 0, "kod yoksa indeks boş");
   });
 
-  test("stopLinesIndex: kodlu OTOBÜS durakları hatları listeler (metro kod kopyalamaz)", async () => {
+  test("stopLinesIndex: kodlu otobüs durakları hatları listeler", async () => {
     const res = await RouteEngine.initGraph(otobusGraph());
     // Plan.buildStopLinesIndex yalnızca d.kod'lu durakları ekler; IETT kodu 'K1'...
     assert.deepEqual(res.stopLinesIndex["K1"], ["500"]);
@@ -46,12 +46,15 @@ describe("RouteEngine.initGraph", () => {
     assert.deepEqual(res.stopLinesIndex["K3"], ["500"]);
   });
 
-  test("METRO durakları kod kopyalamaz (Plan.kur) → stopLinesIndex'te yok + d.kod undefined", async () => {
-    // Plan.kur metro `ekle` `kod` alanını taşımaz; buildStopLinesIndex metro'yu atlar.
+  test("metro istasyonu kodları grafikte ve stopLinesIndex'te korunur", async () => {
     const data = simpleMetroGraph();
     data.istasyonlar = data.istasyonlar.map((s, i) => ({ ...s, kod: "S" + i }));
     const res = await RouteEngine.initGraph(data);
-    assert.equal(Object.keys(res.stopLinesIndex).length, 0, "metro kodu indekslenmez");
+    const ag = Plan.kur(data);
+    for (const istasyon of data.istasyonlar) {
+      assert.equal(ag.duraklar.find((d) => d.istId === istasyon.id).kod, istasyon.kod);
+      assert.deepEqual(res.stopLinesIndex[istasyon.kod], [data.hatlar[0].ad]);
+    }
   });
 
   test("boş veri: {} → boş grafik, marmaray:false", async () => {
@@ -103,26 +106,47 @@ describe("RouteEngine.initGraph", () => {
     assert.ok(res.desenCount >= 1, "otobus desenleri eklenir");
   });
 
-  test("BOZUK VERİ: hatlar string 'x' → initGraph rejects (Plan.kur (g.hatlar||[]).map)", async () => {
-    await assert.rejects(
-      () => RouteEngine.initGraph({ hatlar: "x", istasyonlar: [], marmaray: false }),
-      /map is not a function|not a function/i,
-      "bozuk hatlar için hata fırlatılmalı"
-    );
+  test("hatlar dizi değilse geçerli otobüs grafiği kurulur", async () => {
+    const res = await RouteEngine.initGraph({ ...otobusGraph(), hatlar: "x" });
+    assert.equal(res.durakCount, 3);
+    assert.equal(res.desenCount, 1);
+    assert.deepEqual(res.stopLinesIndex.K1, ["500"]);
   });
 
-  test("BOZUK VERİ: hatlar [null] → initGraph rejects (h.id okuma)", async () => {
-    await assert.rejects(
-      () => RouteEngine.initGraph({ hatlar: [null], istasyonlar: [], marmaray: false }),
-      TypeError
-    );
+  test("bozuk hat kaydı atlanır, geçerli hat korunur", async () => {
+    const data = simpleMetroGraph();
+    data.hatlar.unshift(null, {});
+    const res = await RouteEngine.initGraph(data);
+    assert.equal(res.durakCount, 3);
+    assert.equal(res.desenCount, 2);
   });
 
-  test("BOZUK VERİ: istasyonlar [null] → initGraph rejects (s.lat okuma)", async () => {
-    await assert.rejects(
-      () => RouteEngine.initGraph({ hatlar: [], istasyonlar: [null], marmaray: false }),
-      TypeError
-    );
+  test("bozuk istasyon kayıtları atlanır, geçerli istasyonlar korunur", async () => {
+    const data = simpleMetroGraph();
+    data.istasyonlar.push(null, { ...data.istasyonlar[0], id: 99, lat: Infinity });
+    const res = await RouteEngine.initGraph(data);
+    assert.equal(res.durakCount, 3);
+    assert.equal(res.desenCount, 2);
+  });
+
+  test("bozuk otobüs, metrobüs ve vapur girdileri boş grafik verir", () => {
+    const ag = Plan.kur({
+      marmaray: false,
+      otobus: { hatlar: [null, { kod: "500", yon: { G: ["K1", "K2"], D: "x" } }] },
+      metrobus: { G: [null, {}] },
+      iskeleler: [null],
+      vapur: [null, {
+        ad: "Hasköy - Aşiyan",
+        tablolar: [
+          null,
+          { basliklar: [null], satirlar: "x" },
+          { baslik: 42, basliklar: [null], satirlar: [null, []] },
+        ],
+      }],
+    });
+    assert.deepEqual(ag.duraklar, []);
+    assert.deepEqual(ag.desenler, []);
+    assert.deepEqual(ag.seferler, []);
   });
 });
 
@@ -435,9 +459,11 @@ describe("RouteEngine — Core entegrasyonu sanity", () => {
   test("Core.mesafe temel", () => {
     assert.ok(Core.mesafe({ lat: 41, lon: 29 }, { lat: 41, lon: 29.01 }) > 800);
   });
-  test("Plan.kur boş {} güvenli", () => {
-    const ag = Plan.kur({});
-    assert.ok(Array.isArray(ag.duraklar));
-    assert.ok(Array.isArray(ag.desenler));
+  test("Plan.kur boş veriyle boş grafik kurar", () => {
+    for (const data of [undefined, null, {}]) {
+      const ag = Plan.kur(data);
+      assert.deepEqual(ag.duraklar, []);
+      assert.deepEqual(ag.desenler, []);
+    }
   });
 });

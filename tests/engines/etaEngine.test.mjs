@@ -127,10 +127,9 @@ describe("EtaEngine.predict — hız faktörleri", () => {
     assert.equal(r.hizKmSa, 8, "min 8");
     r = EtaEngine.predict(STOPS, bus, 2, { hatBilgi: {} });
     assert.equal(r.hizKmSa, 15, "geçersiz → 15");
-    // NOT app key mismatch: iett-hatlar `km`/`dk`, Core.ortalamaHiz `uzunlukKm`/`seferSuresiDk` okur → 15.
-    // App `v.bilgi`(km/dk) `hatBilgi` olarak geçer (mapController.js) → schedSpeed=15. bkz. rapor.
+    // İETT hat verisi km/dk alanlarıyla gelir.
     r = EtaEngine.predict(STOPS, bus, 2, { hatBilgi: { km: 12, dk: 30 } });
-    assert.equal(r.hizKmSa, 15, "km/dk anahtarları okunmaz → 15");
+    assert.equal(r.hizKmSa, 24, "İETT verisi: 12 km / 30 dk = 24 km/sa");
   });
 
   test("observedSpeedKmH >=4 → hiz; <4 → yok sayılır", () => {
@@ -340,30 +339,26 @@ describe("EtaEngine.predict — boş/bozuk veri", () => {
     assert.equal(EtaEngine.predict(STOPS, null, 1, {}), null);
     assert.equal(EtaEngine.predict(STOPS, undefined, 1, {}), null);
   });
-  test("ctx verilmezse {} varsayılır", () => {
-    const r = EtaEngine.predict(STOPS, { lat: 41.0, lon: 29.0 }, 2);
-    assert.ok(r);
-    assert.equal(r.hizKmSa, 15);
-  });
-
-  test("BOZUK VERİ: durak listesinde null → TypeError (Core.mesafe okuma)", () => {
-    assert.throws(() => EtaEngine.predict([STOPS[0], null, STOPS[2]], { lat: 41, lon: 29 }, 2, {}), TypeError);
-  });
-
-  test("BOZUK VERİ: bus koordinatları NaN/eksik → null DEĞİL, NaN dakika + OFF_ROUTE döner", () => {
-    // contract yalnızca !bus → null; bozuk koordinatlar korunmaz
-    const r = EtaEngine.predict(STOPS, { lat: NaN, lon: NaN, yakinDurak: "Z" }, 2, {});
-    assert.equal(r, null, "NaN koord + eşleşmeyen yakinDurak → siradaki<0 → null");
-    const r2 = EtaEngine.predict(STOPS, { lat: NaN, lon: NaN }, 2, {}); // kod-less eşleşme...
-    // bu dalda siradaki=0'a düşüp NaN metre üretebilir; davranışı sabitliyoruz:
-    if (r2) {
-      assert.ok(!Number.isFinite(r2.metre) || !Number.isFinite(r2.dakika) || r2.durumKod === "OFF_ROUTE" || r2.metre >= 0);
+  test("ctx boşsa varsayılanlar kullanılır", () => {
+    for (const ctx of [undefined, null]) {
+      const r = EtaEngine.predict(STOPS, { lat: 41.0, lon: 29.0 }, 2, ctx);
+      assert.equal(r.hizKmSa, 15);
     }
   });
 
-  test("BOZUK VERİ: kod-less duraklar → Core.siradakiDurak `undefined===undefined` eşleşmesi", () => {
-    // Core.siradakiDurak (src/core/geo.js): duraklar.findIndex(d => d.kod === bus.yakinDurak)
-    // kod-less duraklarda d.kod===undefined===bus.yakinDurak → i=0 (fallback enYakinIndex atlanır).
+  test("bozuk veya eksik durak koordinatları → null", () => {
+    for (const duraklar of [[STOPS[0], null, STOPS[2]], [STOPS[0], {}, STOPS[2]], [STOPS[0], , STOPS[2]]]) {
+      assert.equal(EtaEngine.predict(duraklar, STOPS[0], 2), null);
+    }
+  });
+
+  test("bozuk araç koordinatları → yakın durak kodu eşleşse de null", () => {
+    for (const konum of [{ lat: NaN, lon: 29 }, { lat: 41 }, { lat: null, lon: 29 }]) {
+      assert.equal(EtaEngine.predict(STOPS, { ...konum, yakinDurak: STOPS[0].kod }, 2), null);
+    }
+  });
+
+  test("kod yoksa sıradaki durak araç konumuyla belirlenir", () => {
     const noKod = [
       { lat: 41.0, lon: 29.0 },
       { lat: 41.0, lon: 29.001 },
@@ -371,11 +366,15 @@ describe("EtaEngine.predict — boş/bozuk veri", () => {
     ];
     const kodded = noKod.map((s, i) => ({ ...s, kod: "S" + i }));
     const bus = { lat: 41.0, lon: 29.002 }; // son durakta
-    // siradakiDurak doğrudan:
-    assert.equal(Core.siradakiDurak(noKod, bus), 1, "kod-less → i=0 başlangıcı + konum bump =1");
-    assert.equal(Core.siradakiDurak(kodded, bus), 2, "kodlu → enYakinIndex=2");
-    // ETA etkisi: kod-less + hedefIndex=1 → null DÖNMEZ (siradaki=1>1 değil); kodlu → null
-    assert.notEqual(EtaEngine.predict(noKod, bus, 1, {}), null, "kod-less siradaki=1 → siradaki>hedefIndex(1) DEĞİL");
-    assert.equal(EtaEngine.predict(kodded, bus, 1, {}), null, "kodlu siradaki=2>1 → null");
+    for (const duraklar of [noKod, kodded]) {
+      assert.equal(Core.siradakiDurak(duraklar, bus), 2);
+      assert.equal(EtaEngine.predict(duraklar, bus, 1), null);
+    }
+  });
+
+  test("geçersiz hedef indeksi → null", () => {
+    for (const hedefIndex of [undefined, NaN, 1.5]) {
+      assert.equal(EtaEngine.predict(STOPS, STOPS[0], hedefIndex), null);
+    }
   });
 });

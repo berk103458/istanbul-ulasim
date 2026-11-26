@@ -57,9 +57,14 @@ export const EtaEngine = (() => {
    * } | null}
    */
   function predict(duraklar, bus, hedefIndex, ctx = {}) {
-    if (!Array.isArray(duraklar) || !duraklar.length || !bus || hedefIndex < 0 || hedefIndex >= duraklar.length) {
+    if (!Array.isArray(duraklar) || !Core.gecerliKonum(bus) ||
+        !Number.isInteger(hedefIndex) || hedefIndex < 0 || hedefIndex >= duraklar.length) {
       return null;
     }
+    for (const durak of duraklar) {
+      if (!Core.gecerliKonum(durak)) return null;
+    }
+    ctx ??= {};
 
     const nearest = Core.enYakinIndex(duraklar, bus);
     const siradaki = Core.siradakiDurak(duraklar, bus);
@@ -74,7 +79,11 @@ export const EtaEngine = (() => {
     const durakSayisi = Math.max(0, hedefIndex - siradaki);
 
     // 2. Base speed & live telemetry speed
-    const schedSpeed = Core.ortalamaHiz(ctx.hatBilgi);
+    const hat = ctx.hatBilgi;
+    const schedSpeed = Core.ortalamaHiz({
+      uzunlukKm: hat?.uzunlukKm ?? hat?.km,
+      seferSuresiDk: hat?.seferSuresiDk ?? hat?.dk,
+    });
     const fleetSpeed = Number(ctx.fleetItem?.hiz ?? bus.hiz);
     const obsSpeed = Number(ctx.observedSpeedKmH);
     let hizKmSa = schedSpeed;
@@ -101,10 +110,10 @@ export const EtaEngine = (() => {
     let kazaEtkisiDk = 0;
     if (te && typeof te.getIncidentPenalty === "function") {
       const incRes = te.getIncidentPenalty(bus, targetStop);
-      kazaEtkisiDk = incRes?.penaltyMin || 0;
+      if (Number.isFinite(incRes?.penaltyMin)) kazaEtkisiDk = incRes.penaltyMin;
     } else if (Array.isArray(ctx.incidents) && ctx.incidents.length) {
       const mid = { lat: (bus.lat + targetStop.lat) / 2, lon: (bus.lon + targetStop.lon) / 2 };
-      const hasNear = ctx.incidents.some((i) => Core.mesafe(mid, i) <= 750);
+      const hasNear = ctx.incidents.some((i) => Core.gecerliKonum(i) && Core.mesafe(mid, i) <= 750);
       if (hasNear) kazaEtkisiDk = 4;
     }
 
@@ -113,7 +122,8 @@ export const EtaEngine = (() => {
 
     // 6. Total dynamic ETA vs scheduled ETA
     const baseRunDk = (metre / 1000 / Math.max(5, hizKmSa)) * 60;
-    const schedOffset = Number(ctx.scheduledOffsetMin) || 0;
+    const offset = Number(ctx.scheduledOffsetMin);
+    const schedOffset = Number.isFinite(offset) ? offset : 0;
     const totalDk = Math.max(0, baseRunDk + duraklamaDk + trafikEtkisiDk + kazaEtkisiDk + schedOffset);
     const scheduledDk = Math.max(0.5, (metre / 1000 / Math.max(8, schedSpeed)) * 60 + duraklamaDk);
     const gecikmeDk = Math.max(0, Math.round((totalDk - scheduledDk) * 10) / 10);
