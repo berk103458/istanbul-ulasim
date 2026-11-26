@@ -4,7 +4,7 @@ import path from "node:path";
 import zlib from "node:zlib";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { handleProxyRequest, CORS_HEADERS } from "./proxyCore.js";
+import { handleProxyHttpRequest, CORS_HEADERS } from "./proxyCore.js";
 import { sharedCache } from "./cacheLayer.js";
 import { gateway } from "./apiGateway.js";
 import { handleSseConnection, getFleetInBbox } from "./sseHub.js";
@@ -168,24 +168,18 @@ export function createServer() {
 
     if (reqUrl.pathname === "/api/proxy") {
       try {
-        let payload;
-        if (req.method === "GET") {
-          payload = { url: reqUrl.searchParams.get("url") || "", method: "GET" };
-        } else if (req.method === "POST") {
-          const raw = await readBody(req);
-          payload = JSON.parse(raw || "{}");
-        } else {
-          res.writeHead(405, CORS_HEADERS);
-          res.end("Method Not Allowed");
-          return;
-        }
-        const result = await handleProxyRequest(payload);
+        const result = await handleProxyHttpRequest({
+          method: req.method,
+          url: reqUrl.href,
+          headers: new Headers(req.headers["content-type"] ? { "Content-Type": req.headers["content-type"] } : {}),
+          json: async () => JSON.parse(await readBody(req)),
+        });
         sendCompressed(
           req,
           res,
           result.status,
-          { ...CORS_HEADERS, ...result.headers },
-          Buffer.from(result.text, "utf8"),
+          Object.fromEntries(result.headers),
+          Buffer.from(await result.arrayBuffer()),
           ".json"
         );
       } catch (e) {

@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { onRequest } from "../functions/api/proxy.js";
 import { sharedCache } from "../server/cacheLayer.js";
 import { gateway } from "../server/apiGateway.js";
+import worker from "../worker.js";
 
 const PROXY_URL = "https://example.test/api/proxy";
 const ALLOWED_URL = "https://api.ibb.gov.tr/__proxy_test__/upstream";
@@ -592,6 +593,87 @@ test("yönlendirme hileleri 403: allowlisted host redirect/disallowed'a geçemez
     });
   });
 });
+
+for (const [name, requestProxy] of [
+  ["Pages", (request) => onRequest({ request })],
+  ["Workers", (request) => worker.fetch(request)],
+]) {
+  test(`${name} validates proxy requests and redirect chains`, async (t) => {
+    resetProxyState();
+
+    await t.test("rejects invalid JSON envelopes and media types before fetching", async () => {
+      const invalidRequests = [
+        ...["", "{", "null", "[]", '"string"', "123", "false"].map(
+          (rawBody) => jsonPost(null, { rawBody }),
+        ),
+        jsonPost({ url: ALLOWED_URL }, { headers: { "Content-Type": "text/plain" } }),
+        new Request(PROXY_URL, {
+          method: "POST",
+          body: new TextEncoder().encode(JSON.stringify({ url: ALLOWED_URL })),
+        }),
+      ];
+      await withStubbedFetch(() => upstream(), async (calls) => {
+        for (const request of invalidRequests) {
+          const response = await requestProxy(request);
+          assert.equal(response.status, 400);
+          assertCors(response);
+          assert.equal(typeof (await response.json()).error, "string");
+        }
+        assert.equal(calls.length, 0);
+      });
+    });
+
+    await t.test("follows relative and absolute allowed redirects with manual fetches", async () => {
+      const redirectUrl = new URL("./next", ALLOWED_URL).href;
+      const finalUrl = "https://api.transitous.org/__proxy_test__/final";
+      await withStubbedFetch((url) => {
+        if (url === ALLOWED_URL) return new Response(null, { status: 307, headers: { Location: "./next" } });
+        if (url === redirectUrl) return Response.redirect(finalUrl, 303);
+        return upstream();
+      }, async (calls) => {
+        const response = await requestProxy(jsonPost({
+          url: ALLOWED_URL,
+          method: "POST",
+          body: "payload",
+          headers: { "Content-Type": "text/xml" },
+        }, { headers: { "Content-Type": "Application/JSON; charset=utf-8" } }));
+        assert.equal(response.status, 200);
+        assert.equal(await response.text(), "upstream-ok");
+        assert.deepEqual(calls.map(({ url }) => url), [ALLOWED_URL, redirectUrl, finalUrl]);
+        assert.ok(calls.every(({ options }) => options.redirect === "manual"));
+        assert.deepEqual(calls.map(({ options }) => [options.method, options.body]), [
+          ["POST", "payload"], ["POST", "payload"], ["GET", undefined],
+        ]);
+      });
+    });
+
+    await t.test("rejects a disallowed target after an allowed hop", async () => {
+      const redirectUrl = new URL("./next", ALLOWED_URL).href;
+      await withStubbedFetch((url) => new Response(null, {
+        status: 302,
+        headers: { Location: url === ALLOWED_URL ? "./next" : "//example.test/blocked" },
+      }), async (calls) => {
+        const response = await requestProxy(getProxy(ALLOWED_URL));
+        assert.equal(response.status, 403);
+        assertCors(response);
+        assert.deepEqual(calls.map(({ url }) => url), [ALLOWED_URL, redirectUrl]);
+        assert.ok(calls.every(({ options }) => options.redirect === "manual"));
+      });
+    });
+
+    await t.test("stops redirect loops after five hops", async () => {
+      await withStubbedFetch(() => new Response(null, {
+        status: 308,
+        headers: { Location: ALLOWED_URL },
+      }), async (calls) => {
+        const response = await requestProxy(getProxy(ALLOWED_URL));
+        assert.equal(response.status, 502);
+        assertCors(response);
+        assert.equal(calls.length, 6);
+      });
+    });
+  });
+}
 
 test("upstream hata davranışı", async (t) => {
   resetProxyState();

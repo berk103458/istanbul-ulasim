@@ -174,6 +174,13 @@ async function runTests() {
   console.log("3. Release artifacts verification...");
   verifyReleaseArtifacts();
 
+  console.log("4. Proxy contract tests...");
+  execFileSync(process.execPath, ["--test", "tests/proxy.test.mjs"], {
+    cwd: root,
+    stdio: "inherit",
+    timeout: 60000,
+  });
+
   console.log("ALL VERIFICATION CHECKS PASSED!");
 }
 
