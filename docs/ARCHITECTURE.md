@@ -26,7 +26,7 @@ Ek katmanlar: katmanlı önbellek (bellek + IndexedDB + service worker + statik 
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Çalışma zamanı: Web/PWA  |  Capacitor Android  |  (Scriptable†)    │
+│  Çalışma zamanı: Web/PWA  |  Capacitor Android                      │
 │                                                                     │
 │  src/main.js ──► src/views/* + src/map/mapController.js  (DOM)      │
 │        │                                                            │
@@ -63,21 +63,18 @@ Proxy'yi sunan adapter'lar (aynı çekirdek, server/proxyCore.js):
 
 Rota motoru ayrı iş parçacığında:
   src/workers/router.worker.js ── INIT_GRAPH / rota mesajları ──► src/core/router.js (Plan)
-
-† Scriptable (`window.__SCRIPTABLE__`, `İstanbul Ulaşım.js`, `legacy/`) şu an çalışır; Faz 5'te kaldırılacak.
 ```
 
 ---
 
 ## 3. Çalışma zamanları
 
-`src/core/bridge.js` `Bridge.runtime` ile dört mod ayırt eder:
+`src/core/bridge.js` `Bridge.runtime` ile üç mod ayırt eder:
 
 | Mod | Tespit | HTTP davranışı | Not |
 | --- | --- | --- | --- |
 | **web** | varsayılan | `isDirectCorsHost` → doğrudan; aksi `./api/proxy` veya `customProxyBase/api/proxy`; `404/405` → `proxyMissing` + statik fallback | PWA + service worker |
 | **capacitor** | `window.Capacitor.isNativePlatform()` | `CapacitorHttp.request` (UA, 20/25 sn timeout); hata + `customProxyBase` → `/api/proxy` | Android; `CapacitorHttp.enabled:false`; konum `@capacitor/geolocation`; `App.backButton` |
-| **scriptable** | `window.__SCRIPTABLE__` | `__bridgeCall("http"...)`, `__bridgeTake/__bridgeDeliver`, `__bridgeCall("location"/"open")` | **Faz 5'te kaldırılacak** |
 | **node** | `typeof window === "undefined"` | doğrudan `fetch`, UA `IstanbulUlasim/5.0` | testler, yerel sunucu, derleme scriptleri |
 
 `Bridge.getProxyUrl()` / `setProxyUrl()` kullanıcı proxy adresi (`customProxyBase`; kalıcı `ulasim.proxyUrl` + `KV proxyUrl`). Boş → aynı-origin `./api/proxy`.
@@ -87,8 +84,7 @@ Rota motoru ayrı iş parçacığında:
 - **Cloudflare Pages** `wrangler.jsonc` ile `dist/` dosyalarını ve `functions/api/proxy.js` adapter'ını kullanır. `onRequest`, isteği doğrudan `handleProxyHttpRequest` işlevine iletir.
 - **Cloudflare Workers** `wrangler.worker.jsonc` ile `worker.js` dosyasını çalıştırır. `/api/proxy` için aynı `handleProxyHttpRequest` işlevini çağırır. `/health` sürümü raporlar. Statik dosyalar ve SPA fallback'i `ASSETS` bağlaması üzerinden sunulur.
 - **Yerel Node sunucusu** `npm start` komutuyla `server/localServer.js` dosyasını çalıştırır ve `127.0.0.1:4173` adresini dinler. Port `PORT` ile ayarlanabilir. Paylaşılan proxy çekirdeğini, statik dosyaları, SSE/filo, sağlık, metrik ve Google Maps uçlarını geliştirme ve test için sunar.
-- **Capacitor Android:** `capacitor.config.json` + `android/`; `npm run build` → `npx cap sync android` → Android Studio / `gradlew`. Bkz. README.
-- **Scriptable (Faz 5'te kaldırılacak):** `İstanbul Ulaşım.js`, `legacy/İstanbul Ulaşım.v3.8.js`, `scripts/build-scriptable.mjs`, `npm run build:scriptable` → `releases/`; native köprü; `fetchStaticJson` kapalı (`window.__SCRIPTABLE__`).
+- **Capacitor 8 Android** derlemesi `npm run build` → `npx cap sync android` → Android Studio / `gradlew` sırasını izler. Node.js 22+, JDK 21, Android SDK Platform 36 ve SDK Build-Tools 35.0.0 gerekir. Proje Gradle Wrapper 8.14.3 ve Android Gradle Plugin 8.13.0 kullanır. IDE ile derlemek için Android Studio Otter (2025.2.1) veya üstü gerekir.
 
 ---
 
@@ -101,7 +97,7 @@ src/
 │                            NotificationEngine; lazy view yükleyiciler; surgicalLiveUpdate; applyTheme; KV hidrasyonu
 ├── core/
 │   ├── api.js               Sağlayıcılar + cache + SOAP + Transitous + fallback; MARMARAY_STATIONS; API.{iett,metro,marmaray,vapur,trafik,iskeleler,ispark,transitous,ag,http}
-│   ├── bridge.js            Bridge: runtime, http, proxy, location, openUrl, Scriptable kuyruğu
+│   ├── bridge.js            Bridge: runtime, http, proxy, location, openUrl
 │   ├── geo.js               Core: mesafe (haversine, R=6371000), yonAcisi, geometri; saf hesap
 │   ├── router.js            Plan (rota v5): graf kurulumu Plan.kur, Plan.ara, buildStopLinesIndex; otobüs/metrobüs/rayli/vapur/yürüme; A*; aktarma; ETA; i18n adları
 │   ├── storage.js           KV: IndexedDB `istanbul-ulasim-v4`/`kv`, localStorage fallback, PREF_KEYS, SWR `get(key,maxAge)`, `set`
@@ -135,19 +131,15 @@ public/
 
 scripts/                     Node ESM
 ├── build-static-data.mjs    canlı kaynak → public/data/*.json (npm script YOK; node scripts/build-static-data.mjs)
-├── generate-icons.mjs       npm run icons (sharp; assets-src/icon-master.png | public/icons/icon-master.png)
-└── build-scriptable.mjs     npm run build:scriptable (dist → tek dosya Scriptable; releases/) [Faz 5]
+└── generate-icons.mjs       npm run icons (sharp; assets-src/icon-master.png | public/icons/icon-master.png)
 
 functions/api/proxy.js       Cloudflare Pages Function adapter'ı
 server/                      proxyCore.js, cacheLayer.js, apiGateway.js, sseHub.js, googleMapsProxy.js
 server/localServer.js        yerel Node geliştirme ve test sunucusu
 worker.js + wrangler.worker.jsonc   Cloudflare Worker ve statik dosyalar
 wrangler.jsonc               Cloudflare Pages yapılandırması
-android/                     Capacitor native Android (com.berk.istanbululasim; minSdk 22; target/compile 34)
+android/                     Capacitor 8 (com.berk.istanbululasim, minSdk 24, target/compile 36)
 tests/                       verify-all.mjs (npm test), benchmark-and-verify.mjs
-legacy/                      Scriptable v3.8 [Faz 5]
-İstanbul Ulaşım.js           Scriptable v3.8 kök kopya [Faz 5]
-releases/                    sürüm artefaktları [Faz 5 ilgili]
 assets-src/                  ikon kaynağı
 ```
 
@@ -160,7 +152,6 @@ assets-src/                  ikon kaynağı
 | `preview` | `vite preview` |
 | `start` | `node server/localServer.js` |
 | `icons` | `node scripts/generate-icons.mjs` |
-| `build:scriptable` | `node scripts/build-scriptable.mjs` |
 | `pretest` | `npm run build` |
 | `test` | `node tests/verify-all.mjs` |
 
@@ -186,7 +177,7 @@ assets-src/                  ikon kaynağı
 
 ### Statik fallback (`public/data`)
 
-Üretici: `scripts/build-static-data.mjs`. Tüketici: `fetchStaticJson()` (`./data/<relPath>`, `staticMem`, Scriptable kapalı) + `DataProvider` SWR. Dosyalar: `iett-hatlar.json`, `iett-ag.json`, `iett-duyurular.json`, `iett-sefer-populer.json`, `vapur.json`, `ispark.json`. **Canlı veri tercih edilir; statik yalnızca hata/offline içindir.**
+Üretici: `scripts/build-static-data.mjs`. Tüketici: `fetchStaticJson()` (`./data/<relPath>`, `staticMem`) + `DataProvider` SWR. Dosyalar: `iett-hatlar.json`, `iett-ag.json`, `iett-duyurular.json`, `iett-sefer-populer.json`, `vapur.json`, `ispark.json`. **Canlı veri tercih edilir; statik yalnızca hata/offline içindir.**
 
 ---
 
@@ -196,7 +187,7 @@ assets-src/                  ikon kaynağı
 
 1. `src/views/*` / `src/map/mapController.js`, `API.*` çağırır (ör. `API.iett.konum(hat)`, `API.trafik.veri()`, `API.ispark.liste()`, `API.transitous.plan(...)`).
 2. `API` kendi katmanlı önbelleği: bellek `mem` + `KV.get/set`; TTL'ler (`GUN=864e5`, durak 7 gün, duyuru 3 dk, sefer 1 gün, vapur 6 sa, ispark 2 dk, trafik geo 7 gün, `iett.ag.v1` 7 gün; `ag.otobus` `kv` + statik + `Promise.all` 6 işçi). `DataProvider.swr` ek stale-while-revalidate + coalescing.
-3. `Bridge.http` platform/ proxy kararını uygular (`isDirectCorsHost`, `customProxyBase`, `proxyMissing`, Capacitor `CapacitorHttp`, Scriptable, node). 25 sn `AbortController`.
+3. `Bridge.http` platform/ proxy kararını uygular (`isDirectCorsHost`, `customProxyBase`, `proxyMissing`, Capacitor `CapacitorHttp`, Node). 25 sn `AbortController`.
 4. Proxy `handleProxyRequest`:
    - **Doğrula:** `url` + `isAllowedUrl` (protokol http/https, host allowlist) → `403 {error:"Forbidden target host"}`; method `GET/POST` → `405`; CORS `*`, `OPTIONS 204`.
    - **Anahtar:** `METHOD:url:body`. **TTL** `getCacheTtlSeconds` (aşağıdaki tablo).
@@ -268,7 +259,6 @@ Pages ve Worker aynı TTL, önbellek, circuit breaker ve istek birleştirme kura
 - **i18n** `src/i18n` tr/en; `t(key, params)`; `KV lang`; `html lang`.
 - **PWA** `manifest.webmanifest`, `sw.js`, ikonlar; `navigator.serviceWorker.register("/sw.js")`; HTTPS/localhost.
 - **Capacitor** `App`, `Geolocation`, `StatusBar`, `CapacitorHttp`; `webDir=dist`; `androidScheme=https`; `appId=com.berk.istanbululasim`; `android/`. `Bridge` Capacitor yolu.
-- **Scriptable** (Faz 5'te kaldırılacak) `Bridge` + `KV` + `__bridge*`; `window.__SCRIPTABLE__`; `scripts/build-scriptable.mjs`; `İstanbul Ulaşım.js`/`legacy`.
 
 ---
 
@@ -284,13 +274,14 @@ Pages ve Worker aynı TTL, önbellek, circuit breaker ve istek birleştirme kura
 
 1. Birim testleri `Zaman`, `Core`, `API.marmaray` ve `Plan.kur/ara` bileşenlerini kapsar.
 2. Yerel sunucu ve proxy entegrasyon testleri statik dosya sunumunu, `/health` yanıtını ve SSRF `403` kontrolünü doğrular. İETT `GetDuyurular_json`, Şehir Hatları ve İSPARK için sabit yerel yanıtlar kullanılır. `npm test -- --live` bu üç kontrolü canlı servislerle yapar ve internet bağlantısı gerektirir.
-3. Betik `releases/Istanbul-Ulasim-v4.0-iOS-Scriptable.js` dosyasını `node --check` ile denetler. `releases/Istanbul-Ulasim-v4.0-Android.apk` varsa boyutu ve ZIP dosya başlığı doğrulanır. `npm test -- --require-apk` APK'nın bulunmasını zorunlu kılar. Artefakt adlarındaki `v4.0` tarihsel dosya adının parçasıdır.
+3. Gradle'ın `android/app/build/outputs/apk/debug/app-debug.apk` çıktısı varsa boyutu ve ZIP dosya başlığı doğrulanır. `npm test -- --require-apk` bu çıktıyı zorunlu kılar.
+4. Proxy sözleşmesi, motor, uygulama ve duman testleri çalışır. Duman testleri `dist/` içeriğini, PWA manifestini ve service worker kaydını, Capacitor yapılandırmasını ve Cloudflare proxy modüllerini doğrular.
 
 `node tests/benchmark-and-verify.mjs` ayrı performans ve ek kontrol betiğidir.
 
 ### Veri üretimi
 
-`node scripts/build-static-data.mjs` (npm script yok; canlı ağ; UA; SOAP; HTML; `public/data/*.json`). `npm run icons`. `npm run build:scriptable` (`dist`→`releases`; önce build; Faz 5).
+`node scripts/build-static-data.mjs` canlı İETT, Şehir Hatları ve İSPARK kaynaklarına bağlanır ve `public/data/*.json` dosyalarını yeniler. `npm run icons` ikonları üretir.
 
 ---
 
@@ -308,11 +299,13 @@ Pages ve Worker aynı TTL, önbellek, circuit breaker ve istek birleştirme kura
 
 Üretim hedefi Cloudflare. Pages ve Workers aynı `/api/proxy` sözleşmesini ve çekirdeği paylaşır. Her iki yapılandırma da `2025-11-01` uyumluluk tarihini ve `nodejs_compat` bayrağını kullanır. Yerel önizleme komutları README'dedir.
 
-Capacitor 6, Android API 22 desteğini korumak için bu fazda tutuldu. Yamalanmış `tar` ana sürümünü zorlamak Android şablon çıkarma adımını bozdu. `npm audit` Capacitor CLI zincirinde beş geliştirme bağımlılığı bulgusu raporlar.
+### Faz 4
 
-### Faz 5
+Capacitor ve resmi eklentiler 8.x'e yükseltildi. Android 7.0 (API 24) ve üzeri desteklenir. Android sistem çubukları için `SystemBars.initialViewportFitValueHint` değeri, web uygulamasının `viewport-fit=cover` ayarını başlangıçta bildirir.
 
-- `İstanbul Ulaşım.js`, `legacy/İstanbul Ulaşım.v3.8.js`, `scripts/build-scriptable.mjs`, `npm run build:scriptable`, `releases/`, `window.__SCRIPTABLE__` köprüsü, `src/core/storage.js` Scriptable/localStorage uyumu, `api.js` Scriptable yolları, `tests/verify-all.mjs` Scriptable artefakt kontrolü.
+### Statik veri yenileme önerisi
+
+Elle yenileme için `package.json` içinde `"data": "node scripts/build-static-data.mjs"` tanımlanabilir. Betik bugün çıktıları aşama aşama yazıyor. Bir kaynak hata verdiğinde bazı dosyalar boş veya eksik kalabilir. Yenileme komutu eklenirken altı çıktı geçici bir dizinde doğrulanmalı, kaynak hataları görünür olmalı ve doğrulama başarılıysa mevcut dosyalar değiştirilmelidir.
 
 ---
 

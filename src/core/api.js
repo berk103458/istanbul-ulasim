@@ -104,7 +104,7 @@ async function soap(path, method, params = {}) {
 
 const staticMem = new Map();
 async function fetchStaticJson(relPath) {
-  if (typeof fetch !== "function" || typeof window === "undefined" || window.__SCRIPTABLE__) return null;
+  if (typeof fetch !== "function" || typeof window === "undefined") return null;
   if (staticMem.has(relPath)) return staticMem.get(relPath);
   const p = fetch("./data/" + relPath)
     .then((r) => (r.ok ? r.json() : null))

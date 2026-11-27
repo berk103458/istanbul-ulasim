@@ -11,6 +11,7 @@ import { iconSvg } from "../ui/icons.js";
 import { t } from "../i18n/index.js";
 import { RouteEngine } from "../engines/routeEngine.js";
 import { esc, bas, metre, saat, renkKod, hataMesaji } from "../map/mapController.js";
+import { accessibleBadgeStyle, bindKeyboardActivators } from "./a11y.js";
 
 const TUR_IKON = {
   metro: "metro",
@@ -29,10 +30,11 @@ const TUR_IKON = {
 };
 
 export function yerAdi(y) {
-  return !y ? "" : y.benim ? "Konumum" : y.ad;
+  return !y ? "" : y.benim ? t("route.myLocation") : y.ad;
 }
 
 export function createRouteView(S, mc, callbacks) {
+  bindKeyboardActivators();
   const AG = { temel: null, otobus: null, vapur: null, kurulma: 0, saatDilimi: null, indirme: null };
   const SEFER = new Map();
   const PLAN_ZAMAN = { gunTipi: null, canli: true, tabanMs: 0, tabanDk: 0 };
@@ -138,7 +140,7 @@ export function createRouteView(S, mc, callbacks) {
     }
   }
 
-  function seferBekleme(p, i, t) {
+  function seferBekleme(p, i, timeMin) {
     if (!p.iett) return undefined;
     const key = gunTipiPlan() + "|" + p.hat;
     if (!SEFER.has(key)) return undefined;
@@ -149,13 +151,13 @@ export function createRouteView(S, mc, callbacks) {
     let en = null;
     for (const k of l) {
       let v = k + p.t[i];
-      if (v < t - 720) v += 1440;
-      if (v >= t && (en == null || v < en)) en = v;
+      if (v < timeMin - 720) v += 1440;
+      if (v >= timeMin && (en == null || v < en)) en = v;
     }
-    return en == null ? null : en - t;
+    return en == null ? null : en - timeMin;
   }
 
-  async function otobusGelis(hat, yon, durakKod, t, desenOfset, now) {
+  async function otobusGelis(hat, yon, durakKod, timeMin, desenOfset, now) {
     const adaylar = [];
     let tarifeVar = false;
     if (PLAN_ZAMAN.canli) {
@@ -192,10 +194,10 @@ export function createRouteView(S, mc, callbacks) {
     } catch {
       // ignore
     }
-    const uygun = adaylar.filter((x) => x.dk >= t - 0.5).sort((x, y) => x.dk - y.dk);
+    const uygun = adaylar.filter((x) => x.dk >= timeMin - 0.5).sort((x, y) => x.dk - y.dk);
     if (uygun.length) return uygun[0];
     if (tarifeVar || adaylar.length) return null;
-    return { dk: t + Plan.otobusAralik(t) / 2, kaynak: "tahmini" };
+    return { dk: timeMin + Plan.otobusAralik(timeMin) / 2, kaynak: "tahmini" };
   }
 
   function geriKaydir(r) {
@@ -206,7 +208,7 @@ export function createRouteView(S, mc, callbacks) {
     const iB = l.findIndex((x, k) => k > iA && x.tur !== "yuru");
     if (iB < 0) return;
     const b1 = l[iB];
-    const aradaYuru = l.slice(iA + 1, iB).reduce((t, x) => t + (x.varis - x.kalkis), 0);
+    const aradaYuru = l.slice(iA + 1, iB).reduce((acc, x) => acc + (x.varis - x.kalkis), 0);
     const bosluk = b1.kalkis - (b0.varis + aradaYuru);
     if (bosluk < 8 || !b0.iett) return;
     const o = seferAl(b0.hat);
@@ -224,7 +226,7 @@ export function createRouteView(S, mc, callbacks) {
     b0.kalkis = en;
     b0.varis += fark;
     b0.kaynak = "tarife";
-    b0.canli = "tarife " + saat(en);
+    b0.canli = `${t("common.schedule")} ${saat(en)}`;
     for (let k = 0; k < iA; k++) {
       l[k].kalkis += fark;
       l[k].varis += fark;
@@ -243,10 +245,10 @@ export function createRouteView(S, mc, callbacks) {
     r.bacaklar = r.bacaklar.filter(
       (b, i, l) => !(b.tur === "yuru" && (b.m || 0) < 40 && (i === 0 || i === l.length - 1) && l.length > 1)
     );
-    let t = now;
+    let curT = now;
     for (const b of r.bacaklar) {
       if ((b.tur === "otobus" || b.tur === "mb") && !b.renk) {
-        b.renk = b.tur === "mb" ? "#d9381e" : renkKod(b.hat);
+        b.renk = b.tur === "mb" ? "#c83219" : renkKod(b.hat);
       }
       // Collect intermediate stop names if available in S.ag
       if (b.desen != null && S.ag?.desenler?.[b.desen] && !b.araDuraklar) {
@@ -258,47 +260,47 @@ export function createRouteView(S, mc, callbacks) {
     for (const b of r.bacaklar) {
       const sure = b.varis - b.kalkis;
       if (b.tur === "yuru") {
-        b.kalkis = t;
-        t += sure;
-        b.varis = t;
+        b.kalkis = curT;
+        curT += sure;
+        b.varis = curT;
         continue;
       }
       if (b.iett && b.durakKodlari) {
         const p = S.ag.desenler[b.desen];
-        const g = await otobusGelis(b.hat, b.yon, b.durakKodlari[0], t, p.t[b.i], now);
+        const g = await otobusGelis(b.hat, b.yon, b.durakKodlari[0], curT, p.t[b.i], now);
         if (!g) {
-          r.gecersiz = `${b.hat} bugün artık sefer yapmıyor`;
+          r.gecersiz = t("route.noMoreService", { hat: b.hat });
           return r;
         }
-        b.bekleme = Math.max(0, g.dk - t);
+        b.bekleme = Math.max(0, g.dk - curT);
         b.kalkis = g.dk;
         b.varis = g.dk + sure;
-        t = b.varis;
+        curT = b.varis;
         b.kaynak = g.kaynak;
         b.canli =
           g.kaynak === "canlı"
-            ? `${g.kapino} ~${Math.max(0, Math.round(g.dk - now))} dk`
+            ? `${g.kapino} ${t("eta.min", { n: Math.max(0, Math.round(g.dk - now)) })}`
             : g.kaynak === "tarife"
-            ? `tarife ${saat(g.dk)}`
-            : "tahmini";
+            ? `${t("common.schedule")} ${saat(g.dk)}`
+            : t("common.schedule");
         continue;
       }
       if (b.kaynak === "transitous") {
-        if (b.kalkis < t - 1) {
-          r.gecersiz = "aktarmaya yetişilemiyor";
+        if (b.kalkis < curT - 1) {
+          r.gecersiz = t("route.missedTransfer");
           return r;
         }
-        b.bekleme = b.kalkis - t;
-        t = b.varis;
+        b.bekleme = b.kalkis - curT;
+        curT = b.varis;
         continue;
       }
       if (b.tur === "vapur") {
-        if (b.kalkis < t - 0.5) {
-          r.gecersiz = "vapura yetişilemiyor";
+        if (b.kalkis < curT - 0.5) {
+          r.gecersiz = t("route.missedFerry");
           return r;
         }
-        b.bekleme = b.kalkis - t;
-        t = b.varis;
+        b.bekleme = b.kalkis - curT;
+        curT = b.varis;
         continue;
       }
       let bekle = b.bekleme ?? 3;
@@ -313,10 +315,10 @@ export function createRouteView(S, mc, callbacks) {
           });
           if (y) {
             const tt = await API.metro.saatler(b.from.istId, b.from.hatId, y.id);
-            const u = tt.saatler.map(Zaman.dk).find((x) => x != null && x >= t);
+            const u = tt.saatler.map(Zaman.dk).find((x) => x != null && x >= curT);
             if (u != null) {
-              bekle = u - t;
-              b.canli = "tarife " + saat(u);
+              bekle = u - curT;
+              b.canli = `${t("common.schedule")} ${saat(u)}`;
               b.kaynak = "tarife";
             }
           }
@@ -325,17 +327,21 @@ export function createRouteView(S, mc, callbacks) {
         }
       }
       b.bekleme = bekle;
-      b.kalkis = t + bekle;
+      b.kalkis = curT + bekle;
       b.varis = b.kalkis + sure;
-      t = b.varis;
+      curT = b.varis;
     }
-    r.varis = t;
-    r.sure = t - now;
+    r.varis = curT;
+    r.sure = curT - now;
     geriKaydir(r);
     const ilk = r.bacaklar.find((x) => x.tur !== "yuru");
     r.canli = ilk?.canli
       ? ilk.kaynak === "canlı"
-        ? `${ilk.hat} (${ilk.canli.split(" ")[0]}) durağa ${ilk.canli.split(" ").slice(1).join(" ")} sonra gelecek`
+        ? t("route.liveBusEta", {
+            hat: ilk.hat,
+            id: ilk.canli.split(" ")[0],
+            eta: ilk.canli.split(" ").slice(1).join(" "),
+          })
         : `${ilk.hat} · ${ilk.canli}`
       : "";
     return r;
@@ -344,7 +350,7 @@ export function createRouteView(S, mc, callbacks) {
   function trDonustur(it) {
     const tur = { BUS: "otobus", TRAM: "tram", SUBWAY: "metro", METRO: "metro", FERRY: "vapur", WALK: "yuru", COACH: "otobus" };
     const bacaklar = (it.legs || []).map((l) => {
-      const t = tur[l.mode] || "otobus";
+      const mode = tur[l.mode] || "otobus";
       let yol = null;
       try {
         yol = l.legGeometry ? polylineCoz(l.legGeometry.points, l.legGeometry.precision || 7) : null;
@@ -355,17 +361,17 @@ export function createRouteView(S, mc, callbacks) {
       const m =
         l.distance ||
         yol.reduce((a, p, i) => (i ? a + Core.mesafe({ lat: yol[i - 1][0], lon: yol[i - 1][1] }, { lat: p[0], lon: p[1] }) : 0), 0);
-      const mb = t === "otobus" && /^34[A-Z]{0,2}$/.test(l.routeShortName || "");
+      const mb = mode === "otobus" && /^34[A-Z]{0,2}$/.test(l.routeShortName || "");
       return {
-        tur: mb ? "mb" : t,
+        tur: mb ? "mb" : mode,
         hat: l.routeShortName || "",
-        renk: mb ? "#d9381e" : t === "otobus" ? renkKod(l.routeShortName || "") : "#0f62fe",
+        renk: mb ? "#c83219" : mode === "otobus" ? renkKod(l.routeShortName || "") : "#0a56e0",
         headsign: l.headsign,
         from: { ad: bas(l.from.name), lat: l.from.lat, lon: l.from.lon },
         to: { ad: bas(l.to.name), lat: l.to.lat, lon: l.to.lon },
         kalkis: isoDk(l.startTime),
         varis: isoDk(l.endTime),
-        durakSayisi: t === "yuru" ? 0 : (l.intermediateStops || []).length + 1,
+        durakSayisi: mode === "yuru" ? 0 : (l.intermediateStops || []).length + 1,
         araDuraklar: (l.intermediateStops || []).map((st) => bas(st.name)).filter(Boolean),
         yol,
         m,
@@ -373,8 +379,8 @@ export function createRouteView(S, mc, callbacks) {
       };
     });
     bacaklar.forEach((b) => {
-      if (b.from.ad === "Start" || b.from.ad === "START") b.from.ad = "Başlangıç";
-      if (/^end$/i.test(b.to.ad)) b.to.ad = "Varış";
+      if (b.from.ad === "Start" || b.from.ad === "START") b.from.ad = t("route.start");
+      if (/^end$/i.test(b.to.ad)) b.to.ad = t("route.destination");
     });
     const r = Plan.duzenle({ bacaklar }, bacaklar[0]?.kalkis ?? Zaman.simdi(), null);
     r.kalkis = Math.min(r.kalkis, bacaklar[0]?.kalkis ?? r.kalkis);
@@ -387,7 +393,7 @@ export function createRouteView(S, mc, callbacks) {
     const no = ++rotaNo;
     if (!sessiz) {
       R.sonuclar = null;
-      R.durum = "Rotalar hesaplanıyor…";
+      R.durum = t("route.calculating");
       callbacks.ciz();
     }
     try {
@@ -395,13 +401,13 @@ export function createRouteView(S, mc, callbacks) {
       let b = R.nereye;
       if (a.benim) {
         const k = S.ben || (await mc.benimKonum(false));
-        if (!k) throw new Error("Konum alınamadı");
-        a = { ...k, ad: "Konumum" };
+        if (!k) throw new Error(t("route.locationError"));
+        a = { ...k, ad: t("route.myLocation") };
       }
       if (b.benim) {
         const k = S.ben || (await mc.benimKonum(false));
-        if (!k) throw new Error("Konum alınamadı");
-        b = { ...k, ad: "Konumum" };
+        if (!k) throw new Error(t("route.locationError"));
+        b = { ...k, ad: t("route.myLocation") };
       }
 
       const taban = R.zaman ? new Date(R.zaman) : new Date();
@@ -446,7 +452,7 @@ export function createRouteView(S, mc, callbacks) {
             (h) => !SEFER.has(gunTipiPlan() + "|" + h)
           );
           if (!yeni.length) break;
-          R.durum = `Sefer saatleri kontrol ediliyor: ${yeni.join(", ")}…`;
+          R.durum = t("route.checkingTimetables", { lines: yeni.join(", ") });
           if (!sessiz) callbacks.ciz();
           await Promise.all(yeni.map(seferHazirla));
           if (no !== rotaNo) return;
@@ -514,7 +520,7 @@ export function createRouteView(S, mc, callbacks) {
         if (tekil0.length >= 12) break;
       }
 
-      R.durum = "Canlı otobüs konumları ve sefer saatleri kontrol ediliyor…";
+      R.durum = t("route.checkingLive");
       if (!sessiz) callbacks.ciz();
       await Promise.all(tekil0.map((r) => rotaInceltme(r, simdi()).catch(() => {})));
       if (no !== rotaNo) return;
@@ -565,17 +571,17 @@ export function createRouteView(S, mc, callbacks) {
           return ib && ib.kalkis - r.kalkis > 45;
         });
       R.durum = [
-        geceMi ? "Şu an çalışan sefer yok; sabahın ilk seferleri gösteriliyor." : "",
-        ileri ? "Seçilen zaman için planlanan sefer saatleri kullanıldı." : "",
-        !AG.otobus ? "Otobüs ağı indiriliyor; bitince öneriler güncellenecek." : "",
-        !S.agVapur ? "Vapur tarifeleri yükleniyor." : "",
+        geceMi ? t("route.nightNotice") : "",
+        ileri ? t("route.futureNotice") : "",
+        !AG.otobus ? t("route.busGraphDownloading") : "",
+        !S.agVapur ? t("route.ferryLoading") : "",
       ]
         .filter(Boolean)
         .join(" ");
 
       if (["rota", "rdetay"].includes(callbacks.sayfa().tur)) callbacks.ciz();
     } catch (e) {
-      R.durum = "Rota hesaplanamadı: " + hataMesaji(e);
+      R.durum = t("route.computeError", { msg: hataMesaji(e) });
       R.sonuclar = [];
       callbacks.ciz();
     }
@@ -621,8 +627,8 @@ export function createRouteView(S, mc, callbacks) {
     const alan = secimAlani;
     secimBitir();
     const yer = {
-      ad: `Seçilen nokta (${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)})`,
-      alt: "Haritadan",
+      ad: t("route.pickedPoint", { lat: e.latlng.lat.toFixed(4), lon: e.latlng.lng.toFixed(4) }),
+      alt: t("route.fromMap"),
       lat: e.latlng.lat,
       lon: e.latlng.lng,
       tur: "harita",
@@ -663,7 +669,7 @@ export function createRouteView(S, mc, callbacks) {
     }
     const durak = ["durak", "metro", "marmaray", "tram", "fun", "tf", "mb", "vapur"].includes(y.tur) || Boolean(y.durak);
     const secilen = y.benim
-      ? { benim: true, ad: "Konumum" }
+      ? { benim: true, ad: t("route.myLocation") }
       : { ad: y.ad, alt: y.alt, lat: y.lat, lon: y.lon, tur: y.tur, durak, kod: y.kod };
 
     if (kaydedilenAlan) {
@@ -742,14 +748,14 @@ export function createRouteView(S, mc, callbacks) {
 
   function bacakRozet(b) {
     const ikon = TUR_IKON[b.tur] || "otobus";
-    const etiket = b.tur === "vapur" ? "Vapur" : [b.hat, ...(b.ekHat || [])].join(" / ");
-    return `<span class="rozet" style="background:${esc(b.renk || "#0f62fe")}">${iconSvg(ikon, 13)} ${esc(etiket)}</span>`;
+    const etiket = b.tur === "vapur" ? t("nav.vapur") : [b.hat, ...(b.ekHat || [])].join(" / ");
+    return `<span class="rozet" style="${accessibleBadgeStyle(b.renk || "#0a56e0")}">${iconSvg(ikon, 13)} ${esc(etiket)}</span>`;
   }
 
   function zincirHTML(r) {
     const p = [];
     r.bacaklar.forEach((b, i) => {
-      if (i) p.push('<span class="ok">›</span>');
+      if (i) p.push('<span class="ok" aria-hidden="true">›</span>');
       p.push(
         b.tur === "yuru"
           ? `<span class="alt">${iconSvg("walk", 13)} ${Math.max(1, Math.round(b.varis - b.kalkis))}</span>`
@@ -774,18 +780,19 @@ export function createRouteView(S, mc, callbacks) {
     const yolculuk = r.varis - (gece ? cikis : r.kalkis);
     const ilkB = r.bacaklar.find((x) => x.tur !== "yuru");
     const fare = routeFare(r);
+    const minUnit = esc(t("unit.minShort"));
     const canli = r.canli
       ? `<div class="alt">${ilkB?.kaynak === "canlı" ? `<span class="canli">${esc(t("common.live"))}</span>` : iconSvg("clock", 13)} ${esc(r.canli)}</div>`
       : "";
 
     return `
-      <div class="kart tik" data-rota="${i}">
+      <div class="kart tik" role="button" tabindex="0" data-rota="${i}">
         <div class="bas" style="justify-content:space-between">
           <div style="flex:1;min-width:0">${zincirHTML(r)}</div>
-          <span class="sure ${i === 0 && !gece ? "yakin" : ""}">${gece ? saat(cikis) : Math.round(r.sure) + " dk"}</span>
+          <span class="sure ${i === 0 && !gece ? "yakin" : ""}">${gece ? saat(cikis) : `${Math.round(r.sure)} ${minUnit}`}</span>
         </div>
         <div class="alt">
-          ${gece ? `<b style="color:var(--yazi)">${saat(cikis)}</b> · ${Math.round(yolculuk)} dk · ` : `${saat(r.kalkis)} → `}
+          ${gece ? `<b style="color:var(--yazi)">${saat(cikis)}</b> · ${Math.round(yolculuk)} ${minUnit} · ` : `${saat(r.kalkis)} → `}
           <b style="color:var(--yazi)">${saat(r.varis)}</b> ${esc(t("route.arrival"))} · ${esc(t("route.walkM", { m: metre(r.yurumeM) }))} · ${r.aktarma ? esc(t("route.transfers", { n: r.aktarma })) : `<b style="color:var(--iyi)">${esc(t("route.direct"))}</b>`}
         </div>
         <div class="alt" style="gap:6px;flex-wrap:wrap">
@@ -801,56 +808,56 @@ export function createRouteView(S, mc, callbacks) {
     const R = S.rota;
     if (ilk) {
       mc.aktifHatlarAyarla([]);
-      if (!R.nereden) R.nereden = { benim: true, ad: "Konumum" };
+      if (!R.nereden) R.nereden = { benim: true, ad: t("route.myLocation") };
       agHazirla().catch(() => {});
     }
     if (ilk && R.nereden?.lat) mc.ucIsaret([R.nereden.lat, R.nereden.lon], "baslangic").addTo(mc.katman);
     if (ilk && R.nereye?.lat) mc.ucIsaret([R.nereye.lat, R.nereye.lon], "varis").addTo(mc.katman);
 
-    let html = callbacks.baslikHTML("Rota Planlayıcı", false);
+    let html = callbacks.baslikHTML(esc(t("route.title")), false);
 
     // Quick Ev & İş Saved Places
     const ev = S.savedPlaces?.ev;
     const is = S.savedPlaces?.is;
     html += `
-      <div class="hizli-yerler" aria-label="Kayıtlı Yerler">
-        <button class="cip" data-kayitli="ev">${iconSvg("home", 15)} Ev${ev ? ` · ${esc(ev.ad.slice(0, 14))}` : " (ekle)"}</button>
-        ${ev ? `<button class="cip" data-kayitli-duzenle="ev" title="Ev konumunu değiştir">Düzenle</button>` : ""}
-        <button class="cip" data-kayitli="is">${iconSvg("work", 15)} İş${is ? ` · ${esc(is.ad.slice(0, 14))}` : " (ekle)"}</button>
-        ${is ? `<button class="cip" data-kayitli-duzenle="is" title="İş konumunu değiştir">Düzenle</button>` : ""}
+      <div class="hizli-yerler" role="group" aria-label="${esc(t("route.savedPlacesAria"))}">
+        <button type="button" class="cip" data-kayitli="ev">${iconSvg("home", 15)} ${esc(t("route.home"))}${ev ? ` · ${esc(ev.ad.slice(0, 14))}` : ` ${esc(t("route.add"))}`}</button>
+        ${ev ? `<button type="button" class="cip" data-kayitli-duzenle="ev" title="${esc(t("route.editHome"))}" aria-label="${esc(t("route.editHome"))}">${esc(t("common.edit"))}</button>` : ""}
+        <button type="button" class="cip" data-kayitli="is">${iconSvg("work", 15)} ${esc(t("route.work"))}${is ? ` · ${esc(is.ad.slice(0, 14))}` : ` ${esc(t("route.add"))}`}</button>
+        ${is ? `<button type="button" class="cip" data-kayitli-duzenle="is" title="${esc(t("route.editWork"))}" aria-label="${esc(t("route.editWork"))}">${esc(t("common.edit"))}</button>` : ""}
       </div>`;
 
-    const giris = (alan, ph) => {
+    const giris = (alan, labelKey, phKey) => {
       const y = R[alan];
       const duzenle = R.aktif === alan;
       return `
         <div class="yer-giris ${alan === "nereye" ? "varis" : ""}">
-          <span class="nokta"></span>
-          <input id="yer_${alan}" data-alan="${alan}" placeholder="${ph}" value="${esc(duzenle ? R.metin : yerAdi(y))}" autocomplete="off">
-          ${y && !duzenle ? `<button data-temizle="${alan}" aria-label="Temizle">${iconSvg("close", 16)}</button>` : ""}
+          <span class="nokta" aria-hidden="true"></span>
+          <input id="yer_${alan}" data-alan="${alan}" aria-label="${esc(t(labelKey))}" placeholder="${esc(t(phKey))}" value="${esc(duzenle ? R.metin : yerAdi(y))}" autocomplete="off">
+          ${y && !duzenle ? `<button type="button" data-temizle="${alan}" aria-label="${esc(t("common.clear"))}">${iconSvg("close", 16)}</button>` : ""}
         </div>`;
     };
 
     html += `
       <div class="rota-ust">
-        ${giris("nereden", "Nereden?")}
-        ${giris("nereye", "Nereye? (yer, durak, istasyon)")}
-        <button class="btn ikon" data-degistir title="Yer değiştir" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:var(--kart)">${iconSvg("swap", 17)}</button>
+        ${giris("nereden", "route.fromLabel", "route.fromPlaceholder")}
+        ${giris("nereye", "route.toLabel", "route.toPlaceholder")}
+        <button type="button" class="btn ikon" data-degistir title="${esc(t("route.swap"))}" aria-label="${esc(t("route.swap"))}" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);background:var(--kart)">${iconSvg("swap", 17)}</button>
       </div>`;
 
     const zv = R.zaman || "";
     html += `
-      <div class="segment">
-        <button data-zaman="simdi" class="${R.zaman ? "" : "aktif"}">Şimdi</button>
-        <button data-zaman="sec" class="${R.zaman ? "aktif" : ""}">${iconSvg("clock", 15)} Tarih ve saat seç</button>
+      <div class="segment" role="group">
+        <button type="button" data-zaman="simdi" class="${R.zaman ? "" : "aktif"}" aria-pressed="${R.zaman ? "false" : "true"}">${esc(t("common.now"))}</button>
+        <button type="button" data-zaman="sec" class="${R.zaman ? "aktif" : ""}" aria-pressed="${R.zaman ? "true" : "false"}">${iconSvg("clock", 15)} ${esc(t("route.pickDate"))}</button>
       </div>`;
     if (R.zaman) {
-      html += `<input type="datetime-local" id="zamanSec" class="giris" value="${esc(zv)}" style="margin-bottom:10px">`;
+      html += `<input type="datetime-local" id="zamanSec" class="giris" aria-label="${esc(t("route.pickDate"))}" value="${esc(zv)}" style="margin-bottom:10px">`;
     }
 
     if (R.aktif) {
       const satir = (o, i) => `
-        <button class="oneri-satir" data-oneri="${i}">
+        <button type="button" class="oneri-satir" data-oneri="${i}">
           <span style="display:flex;align-items:center;gap:10px;min-width:0">
             ${iconSvg(TUR_IKON[o.tur] || "konum", 18)}
             <span style="min-width:0">
@@ -862,24 +869,24 @@ export function createRouteView(S, mc, callbacks) {
         </button>`;
       const ozel = [];
       if (R.aktif === "nereden" && !kaydedilenAlan) {
-        ozel.push({ tur: "benim", ad: "Konumum", alt: "Bulunduğunuz yer", benim: true });
+        ozel.push({ tur: "benim", ad: t("route.myLocation"), alt: t("route.yourCurrentPos"), benim: true });
       }
-      ozel.push({ tur: "harita", ad: "Haritadan seç", alt: "Haritada bir noktaya dokunun", harita: true });
+      ozel.push({ tur: "harita", ad: t("route.tapMap"), alt: t("route.tapMapHint"), harita: true });
       const liste =
         R.metin.trim().length >= 2
           ? ozel.filter((x) => x.harita).concat(R.oneriler)
-          : ozel.concat(R.son.map((x) => ({ ...x, tur: "son", alt: x.alt || "Son aranan" })));
+          : ozel.concat(R.son.map((x) => ({ ...x, tur: "son", alt: x.alt || t("route.recentSearch") })));
       R.gosterilen = liste;
-      html += `<div class="oneriler">${liste.map(satir).join("") || `<div class="alt" style="padding:12px">Aranıyor…</div>`}</div>`;
+      html += `<div class="oneriler">${liste.map(satir).join("") || `<div class="alt" style="padding:12px">${esc(t("route.searching"))}</div>`}</div>`;
     }
 
     if (AG.indirme && AG.indirme.toplam) {
       const pct = Math.round((100 * AG.indirme.bitti) / AG.indirme.toplam);
-      html += `<div class="alt" style="margin-bottom:8px">Otobüs ağı hazırlanıyor: ${AG.indirme.bitti}/${AG.indirme.toplam} (%${pct})</div>`;
+      html += `<div class="alt" style="margin-bottom:8px">${esc(t("route.busGraphProgress", { done: AG.indirme.bitti, total: AG.indirme.toplam, pct }))}</div>`;
     }
 
     if (R.nereden && R.nereye && !R.aktif) {
-      html += `<button class="btn birincil" style="width:100%;margin-bottom:10px" data-rotabul>${iconSvg("rota", 18)} ${esc(t("route.findBtn"))}</button>`;
+      html += `<button type="button" class="btn birincil" style="width:100%;margin-bottom:10px" data-rotabul>${iconSvg("rota", 18)} ${esc(t("route.findBtn"))}</button>`;
       if (R.durum) html += `<div class="alt" style="margin-bottom:8px">${esc(R.durum)}</div>`;
       if (R.sonuclar) {
         const filtre = R.filtre || "onerilen";
@@ -893,11 +900,11 @@ export function createRouteView(S, mc, callbacks) {
           "traffic_resilient",
         ];
         html += `
-          <div class="cip-satir" aria-label="Rota Sıralama">
+          <div class="cip-satir" role="group" aria-label="${esc(t("route.sortAria"))}">
             ${criteriaKeys
               .map(
                 (k) =>
-                  `<button class="cip ${filtre === k ? "aktif" : ""}" data-rfiltre="${k}">${esc(t(`route.criteria.${k}`))}</button>`
+                  `<button type="button" class="cip ${filtre === k ? "aktif" : ""}" data-rfiltre="${k}" aria-pressed="${filtre === k ? "true" : "false"}">${esc(t(`route.criteria.${k}`))}</button>`
               )
               .join("")}
           </div>`;
@@ -946,8 +953,8 @@ export function createRouteView(S, mc, callbacks) {
           L.polyline(yol, { color: "#6b7280", weight: 4, dashArray: "2 8", lineCap: "round", interactive: false }).addTo(mc.katman);
         } else {
           L.polyline(yol, { color: "#fff", weight: 7, opacity: 0.9, interactive: false }).addTo(mc.katman);
-          L.polyline(yol, { color: b.renk || "#0f62fe", weight: 4, interactive: false }).addTo(mc.katman);
-          L.circleMarker(yol[0], { radius: 5, color: b.renk || "#0f62fe", weight: 3, fillColor: "#fff", fillOpacity: 1 })
+          L.polyline(yol, { color: b.renk || "#0a56e0", weight: 4, interactive: false }).addTo(mc.katman);
+          L.circleMarker(yol[0], { radius: 5, color: b.renk || "#0a56e0", weight: 3, fillColor: "#fff", fillOpacity: 1 })
             .bindTooltip(esc(b.from.ad))
             .addTo(mc.katman);
         }
@@ -972,7 +979,7 @@ export function createRouteView(S, mc, callbacks) {
           delayBanner = `
             <div class="uyari-banner">
               <span>${iconSvg("alert", 15)} <span>${esc(msg)}</span></span>
-              <button class="btn kucuk birincil" data-rotabul-alt>${iconSvg("refresh", 13)} ${esc(t("route.recalcAlt"))}</button>
+              <button type="button" class="btn kucuk birincil" data-rotabul-alt>${iconSvg("refresh", 13)} ${esc(t("route.recalcAlt"))}</button>
             </div>`;
         }
       } catch {
@@ -981,8 +988,9 @@ export function createRouteView(S, mc, callbacks) {
     }
 
     const fare = routeFare(r);
-    const paylasBtn = `<button class="btn kucuk" data-rota-paylas="${p.i}">${iconSvg("share", 14)} ${esc(t("common.share"))}</button>`;
-    let html = callbacks.baslikHTML(`${Math.round(r.sure)} dk · ${saat(r.varis)} ${esc(t("route.arrival"))}`, true, paylasBtn);
+    const minUnit = esc(t("unit.minShort"));
+    const paylasBtn = `<button type="button" class="btn kucuk" data-rota-paylas="${p.i}">${iconSvg("share", 14)} ${esc(t("common.share"))}</button>`;
+    let html = callbacks.baslikHTML(`${Math.round(r.sure)} ${minUnit} · ${saat(r.varis)} ${esc(t("route.arrival"))}`, true, paylasBtn);
     html += `<div style="margin-bottom:8px">${zincirHTML(r)}</div>`;
     html += `<div class="alt" style="margin-bottom:10px;gap:6px;flex-wrap:wrap">
       <span>${esc(t("route.fareFull", { tl: fare.tam.toFixed(2) }))}</span>
@@ -997,8 +1005,12 @@ export function createRouteView(S, mc, callbacks) {
         const ayniDurak = (b.m || 0) < 40 && i > 0 && i < r.bacaklar.length - 1;
         html += `
           <div class="bacak yuruyus">
-            <div class="bas">${saat(b.kalkis)} · ${ayniDurak ? "Aynı durakta aktarma" : `${Math.max(1, Math.round(b.varis - b.kalkis))} dk yürüme (${metre(b.m)})`}</div>
-            <div class="alt">→ ${i === r.bacaklar.length - 1 ? "Varış noktası" : esc(b.to.ad)}</div>
+            <div class="bas">${saat(b.kalkis)} · ${
+          ayniDurak
+            ? esc(t("route.sameStopTransfer"))
+            : esc(t("route.walkDurationDist", { min: Math.max(1, Math.round(b.varis - b.kalkis)), m: metre(b.m) }))
+        }</div>
+            <div class="alt">→ ${i === r.bacaklar.length - 1 ? esc(t("route.destinationPoint")) : esc(b.to.ad)}</div>
           </div>`;
         return;
       }
@@ -1015,16 +1027,16 @@ export function createRouteView(S, mc, callbacks) {
       html += `
         <div class="bacak" style="border-left-color:${esc(b.renk || "var(--vurgu)")}">
           <div class="bas">${saat(b.kalkis)} · ${bacakRozet(b)} <span>${esc(b.from.ad)}</span> ${canli}</div>
-          <div class="alt">${esc(tur)}${b.yonAd ? " · " + esc(bas(b.yonAd)) : ""}${b.headsign ? " · " + esc(bas(b.headsign)) : ""}${b.bekleme ? ` · ~${Math.round(b.bekleme)} dk bekleme` : ""}</div>
-          <div class="alt">${b.durakSayisi ? b.durakSayisi + " durak · " : ""}${Math.max(1, Math.round(b.varis - b.kalkis))} dk → <b style="color:var(--yazi)">${esc(b.to.ad)}</b> (${saat(b.varis)})</div>
-          ${ara.length ? `<button class="btn kucuk" style="align-self:flex-start;margin-top:4px" data-bacak-durak="${i}">${acik ? "Durakları gizle" : `${ara.length} ara durak`}</button>` : ""}
+          <div class="alt">${esc(tur)}${b.yonAd ? " · " + esc(bas(b.yonAd)) : ""}${b.headsign ? " · " + esc(bas(b.headsign)) : ""}${b.bekleme ? ` · ${esc(t("route.waitMin", { min: Math.round(b.bekleme) }))}` : ""}</div>
+          <div class="alt">${b.durakSayisi ? `${esc(t("eta.stopsAway", { n: b.durakSayisi }))} · ` : ""}${Math.max(1, Math.round(b.varis - b.kalkis))} ${minUnit} → <b style="color:var(--yazi)">${esc(b.to.ad)}</b> (${saat(b.varis)})</div>
+          ${ara.length ? `<button type="button" class="btn kucuk" style="align-self:flex-start;margin-top:4px" data-bacak-durak="${i}" aria-expanded="${acik ? "true" : "false"}">${esc(acik ? t("route.hideStops") : t("route.intermediateStops", { n: ara.length }))}</button>` : ""}
           ${acik && ara.length ? `<div class="alt" style="flex-direction:column;align-items:flex-start;gap:2px;margin-top:4px">${ara.map((ad) => `<span>· ${esc(ad)}</span>`).join("")}</div>` : ""}
         </div>`;
     });
 
     html += `
       <div class="bacak" style="border-left-color:var(--hata)">
-        <div class="bas">${saat(r.varis)} · Varış</div>
+        <div class="bas">${saat(r.varis)} · ${esc(t("route.destination"))}</div>
         <div class="alt">${esc(yerAdi(S.rota.nereye))}</div>
       </div>
     </div>`;
@@ -1036,11 +1048,15 @@ export function createRouteView(S, mc, callbacks) {
     const r = S.rota.gosterilenSonuclar?.[idx] || S.rota.sonuclar?.[idx];
     if (!r) return;
     const ozet = r.bacaklar
-      .map((b) => (b.tur === "yuru" ? `Yürü (${metre(b.m)})` : `${b.hat || "Vapur"} (${b.from.ad} → ${b.to.ad})`))
+      .map((b) =>
+        b.tur === "yuru"
+          ? t("route.shareWalk", { m: metre(b.m) })
+          : `${b.hat || t("nav.vapur")} (${b.from.ad} → ${b.to.ad})`
+      )
       .join(" > ");
-    const text = `İstanbul Ulaşım Rota (${Math.round(r.sure)} dk, ${saat(r.varis)} varış): ${ozet}`;
+    const text = t("route.shareText", { min: Math.round(r.sure), arr: saat(r.varis), summary: ozet });
     try {
-      if (navigator.share) await navigator.share({ title: "İstanbul Ulaşım Rotası", text });
+      if (navigator.share) await navigator.share({ title: t("route.shareTitle"), text });
       else if (navigator.clipboard) await navigator.clipboard.writeText(text);
     } catch {
       // user cancelled share
@@ -1053,7 +1069,7 @@ export function createRouteView(S, mc, callbacks) {
       const target = S.rota.aktif === "nereden" ? "nereden" : "nereye";
       S.rota[target] = saved;
       S.rota.aktif = null;
-      if (!S.rota.nereden) S.rota.nereden = { benim: true, ad: "Konumum" };
+      if (!S.rota.nereden) S.rota.nereden = { benim: true, ad: t("route.myLocation") };
       callbacks.ciz(true);
       if (S.rota.nereden && S.rota.nereye) rotaBul();
       return;
@@ -1078,7 +1094,7 @@ export function createRouteView(S, mc, callbacks) {
     handleSavedPlace,
     setRoutePlace(alan, yer) {
       S.rota[alan] = yer;
-      if (!S.rota.nereden) S.rota.nereden = { benim: true, ad: "Konumum" };
+      if (!S.rota.nereden) S.rota.nereden = { benim: true, ad: t("route.myLocation") };
       S.rota.aktif = null;
       S.sekme = "rota";
       S.yigin = [];

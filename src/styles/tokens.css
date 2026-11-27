@@ -1,44 +1,48 @@
 /* ==========================================================================
-   İstanbul Ulaşım v4.0 — Design Tokens (Light & Dark)
+   İstanbul Ulaşım v5.0 — Design Tokens (Light & Dark, WCAG AA Contrast)
    ========================================================================== */
 
 :root {
   color-scheme: light;
 
   /* Brand & Semantic Palette */
-  --vurgu: #0f62fe;
-  --vurgu-yumusak: rgba(15, 98, 254, 0.11);
+  --vurgu: #0a56e0;
+  --vurgu-yumusak: rgba(10, 86, 224, 0.11);
   --vurgu-yazi: #ffffff;
+  --odak: #0a56e0;
+  --odak-halka: rgba(10, 86, 224, 0.34);
+  --pin-yazi: #ffffff;
 
-  --iyi: #0d9448;
-  --iyi-yumusak: rgba(13, 148, 72, 0.12);
-  --uyari: #d97706;
-  --uyari-yumusak: rgba(217, 119, 6, 0.13);
-  --hata: #dc2626;
-  --hata-yumusak: rgba(220, 38, 38, 0.12);
+  --iyi: #0b7a3b;
+  --iyi-yumusak: rgba(11, 122, 59, 0.12);
+  --uyari: #a15403;
+  --uyari-yumusak: rgba(161, 84, 3, 0.13);
+  --hata: #c81e1e;
+  --hata-yumusak: rgba(200, 30, 30, 0.12);
 
   /* Surfaces & Text */
   --bg: #f3f5f8;
   --kart: #ffffff;
   --kart-2: #eef2f7;
   --yazi: #111827;
-  --soluk: #5b6577;
-  --cizgi: rgba(15, 23, 42, 0.09);
+  --soluk: #525c6e;
+  --cizgi: rgba(15, 23, 42, 0.1);
   --golge: 0 8px 28px rgba(15, 23, 42, 0.12);
   --golge-hafif: 0 2px 10px rgba(15, 23, 42, 0.06);
+  --golge-yuksek: var(--golge);
 
   /* Glassmorphism */
-  --cam-bg: rgba(255, 255, 255, 0.84);
-  --cam-cizgi: rgba(15, 23, 42, 0.08);
-  --backdrop: rgba(15, 23, 42, 0.44);
+  --cam-bg: rgba(255, 255, 255, 0.88);
+  --cam-cizgi: rgba(15, 23, 42, 0.1);
+  --backdrop: rgba(15, 23, 42, 0.48);
 
-  /* Transit Mode Colors */
-  --mod-otobus: #e67e22;
-  --mod-mb: #d9381e;
-  --mod-metro: #0f62fe;
+  /* Transit Mode Colors (all >= 4.5:1 with #ffffff text) */
+  --mod-otobus: #b45309;
+  --mod-mb: #c83219;
+  --mod-metro: #0a56e0;
   --mod-marmaray: #1d4ed8;
-  --mod-tram: #0d9488;
-  --mod-vapur: #0284c7;
+  --mod-tram: #0f766e;
+  --mod-vapur: #0369a1;
   --mod-fun: #7c3aed;
 
   /* Layout & Geometry */
@@ -46,6 +50,8 @@
   --radius: 16px;
   --radius-sm: 12px;
   --radius-lg: 22px;
+  --r-orta: var(--radius);
+  --r-kucuk: var(--radius-sm);
   --tap: 44px;
 
   /* Safe Areas */
@@ -62,9 +68,12 @@
 [data-theme="dark"] {
   color-scheme: dark;
 
-  --vurgu: #4d8eff;
-  --vurgu-yumusak: rgba(77, 142, 255, 0.18);
+  --vurgu: #5c9aff;
+  --vurgu-yumusak: rgba(92, 154, 255, 0.18);
   --vurgu-yazi: #0b111c;
+  --odak: #7cb0ff;
+  --odak-halka: rgba(124, 176, 255, 0.42);
+  --pin-yazi: #0b111c;
 
   --iyi: #34d399;
   --iyi-yumusak: rgba(52, 211, 153, 0.16);
@@ -77,23 +86,27 @@
   --kart: #151b24;
   --kart-2: #1d2532;
   --yazi: #f3f6fc;
-  --soluk: #9aa6ba;
-  --cizgi: rgba(255, 255, 255, 0.09);
+  --soluk: #a3afc2;
+  --cizgi: rgba(255, 255, 255, 0.11);
   --golge: 0 12px 32px rgba(0, 0, 0, 0.55);
   --golge-hafif: 0 2px 12px rgba(0, 0, 0, 0.32);
+  --golge-yuksek: var(--golge);
 
-  --cam-bg: rgba(22, 27, 36, 0.84);
-  --cam-cizgi: rgba(255, 255, 255, 0.11);
-  --backdrop: rgba(0, 0, 0, 0.64);
+  --cam-bg: rgba(22, 27, 36, 0.88);
+  --cam-cizgi: rgba(255, 255, 255, 0.13);
+  --backdrop: rgba(0, 0, 0, 0.68);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
 
-    --vurgu: #4d8eff;
-    --vurgu-yumusak: rgba(77, 142, 255, 0.18);
+    --vurgu: #5c9aff;
+    --vurgu-yumusak: rgba(92, 154, 255, 0.18);
     --vurgu-yazi: #0b111c;
+    --odak: #7cb0ff;
+    --odak-halka: rgba(124, 176, 255, 0.42);
+    --pin-yazi: #0b111c;
 
     --iyi: #34d399;
     --iyi-yumusak: rgba(52, 211, 153, 0.16);
@@ -106,13 +119,14 @@
     --kart: #151b24;
     --kart-2: #1d2532;
     --yazi: #f3f6fc;
-    --soluk: #9aa6ba;
-    --cizgi: rgba(255, 255, 255, 0.09);
+    --soluk: #a3afc2;
+    --cizgi: rgba(255, 255, 255, 0.11);
     --golge: 0 12px 32px rgba(0, 0, 0, 0.55);
     --golge-hafif: 0 2px 12px rgba(0, 0, 0, 0.32);
+    --golge-yuksek: var(--golge);
 
-    --cam-bg: rgba(22, 27, 36, 0.84);
-    --cam-cizgi: rgba(255, 255, 255, 0.11);
-    --backdrop: rgba(0, 0, 0, 0.64);
+    --cam-bg: rgba(22, 27, 36, 0.88);
+    --cam-cizgi: rgba(255, 255, 255, 0.13);
+    --backdrop: rgba(0, 0, 0, 0.68);
   }
 }

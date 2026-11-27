@@ -21,8 +21,8 @@ export const GoogleMapsService = (() => {
    */
   async function checkAvailability(force = false) {
     if (cachedStatus && !force) return cachedStatus;
-    if (Bridge.runtime === "scriptable" || typeof fetch !== "function") {
-      cachedStatus = { configured: false, reason: "static_or_scriptable" };
+    if (typeof fetch !== "function") {
+      cachedStatus = { configured: false, reason: "fetch_unavailable" };
       return cachedStatus;
     }
 

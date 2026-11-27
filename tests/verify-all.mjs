@@ -117,16 +117,12 @@ async function verifyServer() {
   }
 }
 
-function verifyReleaseArtifacts() {
-  const scriptablePath = path.join(root, "releases", "Istanbul-Ulasim-v4.0-iOS-Scriptable.js");
-  assert.ok(fs.existsSync(scriptablePath), "Scriptable bundle must exist");
-  execFileSync(process.execPath, ["--check", scriptablePath], { stdio: "inherit", timeout: 10000 });
-
-  const apkName = "Istanbul-Ulasim-v4.0-Android.apk";
-  const apkPath = path.join(root, "releases", apkName);
+function verifyAndroidApk() {
+  const apkOutput = "android/app/build/outputs/apk/debug/app-debug.apk";
+  const apkPath = path.join(root, apkOutput);
   if (!fs.existsSync(apkPath)) {
-    assert.ok(!requireApk, `Android APK must exist at releases/${apkName}`);
-    console.log(`   Android check skipped: releases/${apkName} is absent (use --require-apk to require it).`);
+    assert.ok(!requireApk, `Android APK must exist at ${apkOutput} (run assembleDebug)`);
+    console.log(`   Android check skipped: ${apkOutput} is absent (use --require-apk to require it).`);
     return;
   }
 
@@ -137,6 +133,7 @@ function verifyReleaseArtifacts() {
     const header = Buffer.alloc(4);
     fs.readSync(fd, header, 0, header.length, 0);
     assert.equal(header.toString("hex"), "504b0304", "APK must start with a ZIP local file header");
+    console.log(`   Verified ${apkOutput} (${stat.size} bytes).`);
   } finally {
     fs.closeSync(fd);
   }
@@ -171,8 +168,8 @@ async function runTests() {
   await verifyServer();
   if (!live) console.log("   Live checks for İETT, Şehir Hatları and İSPARK: npm test -- --live");
 
-  console.log("3. Release artifacts verification...");
-  verifyReleaseArtifacts();
+  console.log("3. Android APK verification...");
+  verifyAndroidApk();
 
   console.log("4. Proxy contract tests...");
   execFileSync(process.execPath, ["--test", "tests/proxy.test.mjs"], {
@@ -190,6 +187,13 @@ async function runTests() {
 
   console.log("6. App tests...");
   execFileSync(process.execPath, ["--test", "tests/app/"], {
+    cwd: root,
+    stdio: "inherit",
+    timeout: 60000,
+  });
+
+  console.log("7. Build & platform smoke tests...");
+  execFileSync(process.execPath, ["--test", "tests/smoke/"], {
     cwd: root,
     stdio: "inherit",
     timeout: 60000,

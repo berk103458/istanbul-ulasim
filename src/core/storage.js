@@ -1,4 +1,4 @@
-// ---- Kalıcı depolama: IndexedDB (100MB+ destekli) + Scriptable/localStorage uyumu ----
+// ---- Kalıcı depolama: IndexedDB (100MB+ destekli) + localStorage ----
 const DB_NAME = "istanbul-ulasim-v4";
 const STORE_NAME = "kv";
 const PREF_KEYS = new Set(["favoriler", "durak", "sonYerler", "savedPlaces", "tema", "mapStyle", "proxyUrl", "trafik", "ispark"]);
@@ -43,24 +43,20 @@ export const KV = {
   async get(key, maxAgeMs) {
     try {
       let rec = null;
-      if (typeof window !== "undefined" && window.__SCRIPTABLE__ && window.__bridgeCall) {
-        rec = await window.__bridgeCall("kvget", { key });
-      } else {
-        const db = await openDb();
-        if (db) {
-          rec = await new Promise((res) => {
-            try {
-              const tx = db.transaction(STORE_NAME, "readonly");
-              const rq = tx.objectStore(STORE_NAME).get(key);
-              rq.onsuccess = () => res(rq.result || null);
-              rq.onerror = () => res(null);
-            } catch {
-              res(null);
-            }
-          });
-        }
-        if (!rec) rec = lsGet(key);
+      const db = await openDb();
+      if (db) {
+        rec = await new Promise((res) => {
+          try {
+            const tx = db.transaction(STORE_NAME, "readonly");
+            const rq = tx.objectStore(STORE_NAME).get(key);
+            rq.onsuccess = () => res(rq.result || null);
+            rq.onerror = () => res(null);
+          } catch {
+            res(null);
+          }
+        });
       }
+      if (!rec) rec = lsGet(key);
       if (!rec) return null;
       if (maxAgeMs && Date.now() - rec.t > maxAgeMs) return null;
       return rec.d;
@@ -72,9 +68,6 @@ export const KV = {
   async set(key, d) {
     const rec = { t: Date.now(), d };
     try {
-      if (typeof window !== "undefined" && window.__SCRIPTABLE__ && window.__bridgeCall) {
-        return await window.__bridgeCall("kvset", { key, value: rec });
-      }
       const db = await openDb();
       if (db) {
         await new Promise((res) => {

@@ -1,5 +1,5 @@
 /**
- * İstanbul Ulaşım v4.0 — Raylı Sistem (Marmaray 43 İstasyon, Metro, Tramvay, Füniküler, Teleferik)
+ * İstanbul Ulaşım v5.0 — Raylı Sistem (Marmaray 43 İstasyon, Metro, Tramvay, Füniküler, Teleferik)
  */
 import L from "leaflet";
 import { Zaman } from "../core/time.js";
@@ -7,7 +7,9 @@ import { Core } from "../core/geo.js";
 import { API } from "../core/api.js";
 import { Plan } from "../core/router.js";
 import { iconSvg } from "../ui/icons.js";
+import { t } from "../i18n/index.js";
 import { esc, metre, saat, hataMesaji } from "../map/mapController.js";
+import { accessibleBadgeStyle, bindKeyboardActivators } from "./a11y.js";
 
 // Fallback Marmaray stations if API.marmaray.istasyonlar is unavailable
 const FALLBACK_MARMARAY = [
@@ -27,6 +29,13 @@ const FALLBACK_MARMARAY = [
   ["Florya", 40.97296, 28.78748, 102.3], ["Küçükçekmece", 40.98853, 28.77295, 105.8], ["Mustafa Kemal", 41.00628, 28.77395, 109.1],
   ["Halkalı", 41.01784, 28.76644, 111.6],
 ].map(([ad, lat, lon, dk], sira) => ({ id: "mr:" + ad, ad, lat, lon, dk, sira }));
+
+const RAIL_GROUPS = [
+  { key: "Metro", i18n: "rail.groupMetro", icon: "metro" },
+  { key: "Tramvay", i18n: "rail.groupTram", icon: "tram" },
+  { key: "Füniküler", i18n: "rail.groupFunicular", icon: "fun" },
+  { key: "Teleferik", i18n: "rail.groupCableCar", icon: "tf" },
+];
 
 async function getMarmarayStations() {
   try {
@@ -65,7 +74,10 @@ function marmarayNextDepartures(stationIndex, stations, direction, count = 6) {
   for (let k = 360; k <= 1440; k += step) {
     const arr = Math.round(k + offset);
     if (arr >= simdi && arr <= 1480) {
-      times.push({ dk: arr, tur: inShortLoop && k % 15 !== 0 ? "Pendik–Ataköy (8 dk)" : "Gebze–Halkalı (15 dk)" });
+      times.push({
+        dk: arr,
+        tur: inShortLoop && k % 15 !== 0 ? t("rail.marmarayShortLoop") : t("rail.marmarayFullLoop"),
+      });
       if (times.length >= count) break;
     }
   }
@@ -73,9 +85,11 @@ function marmarayNextDepartures(stationIndex, stations, direction, count = 6) {
 }
 
 export function createRailView(S, mc, callbacks) {
+  bindKeyboardActivators();
+
   async function renderList(p, ilk) {
     if (ilk) {
-      callbacks.onYukle("Raylı Sistem", false);
+      callbacks.onYukle(t("rail.title"), false);
       mc.aktifHatlarAyarla([]);
     }
     const [hatlar, durum, mrIst] = await Promise.all([
@@ -87,11 +101,11 @@ export function createRailView(S, mc, callbacks) {
     const q = (S.rayliArama || "").trim().toLocaleLowerCase("tr");
     const grup = (h) => ({ tram: "Tramvay", tf: "Teleferik", fun: "Füniküler", metro: "Metro" }[Plan.turOf(h.ad)]);
 
-    let html = callbacks.baslikHTML("Raylı Sistem", false);
+    let html = callbacks.baslikHTML(esc(t("rail.title")), false);
     html += `
       <div class="arama-kutu">
-        <span class="arama-ikon">${iconSvg("search", 17)}</span>
-        <input class="giris" id="rayliAra" placeholder="Hat veya istasyon ara (Marmaray, M2, T1…)" value="${esc(S.rayliArama || "")}" autocomplete="off">
+        <span class="arama-ikon" aria-hidden="true">${iconSvg("search", 17)}</span>
+        <input type="search" class="giris" id="rayliAra" aria-label="${esc(t("rail.searchLabel"))}" placeholder="${esc(t("rail.searchPlaceholder"))}" value="${esc(S.rayliArama || "")}" autocomplete="off">
       </div>`;
 
     if (durum.length) {
@@ -106,16 +120,16 @@ export function createRailView(S, mc, callbacks) {
     // Marmaray Section
     const mrMatch = !q || "marmaray gebze halkalı".includes(q) || mrIst.some((s) => s.ad.toLocaleLowerCase("tr").includes(q));
     if (mrMatch) {
-      html += `<div class="baslik-satir"><h2>Marmaray</h2><span class="soluk">${mrIst.length} istasyon</span></div>`;
+      html += `<div class="baslik-satir"><h2>Marmaray</h2><span class="soluk">${esc(t("rail.stationsCount", { n: mrIst.length }))}</span></div>`;
       html += `
         <div class="liste">
-          <div class="kart satir tik" data-rhat="MR">
+          <div class="kart satir tik" role="button" tabindex="0" data-rhat="MR">
             <div class="kart-sol">
               <div class="bas">
                 <span class="rozet marmaray">${iconSvg("marmaray", 13)} MR</span>
                 <span>Gebze – Halkalı (Marmaray)</span>
               </div>
-              <div class="alt">06:00 – 00:00 · 8 dk (Pendik–Ataköy) / 15 dk (Tam hat)</div>
+              <div class="alt">${esc(t("rail.marmarayMeta"))}</div>
             </div>
             <div class="kart-sag">${iconSvg("chevronRight", 16)}</div>
           </div>
@@ -123,28 +137,27 @@ export function createRailView(S, mc, callbacks) {
     }
 
     // Metro, Tramvay, Füniküler, Teleferik
-    for (const g of ["Metro", "Tramvay", "Füniküler", "Teleferik"]) {
+    for (const g of RAIL_GROUPS) {
       const l = hatlar.filter((h) => {
-        if (grup(h) !== g) return false;
+        if (grup(h) !== g.key) return false;
         if (!q) return true;
         return h.ad.toLocaleLowerCase("tr").includes(q) || h.uzun.toLocaleLowerCase("tr").includes(q);
       });
       if (!l.length) continue;
 
-      const ikonAd = g === "Tramvay" ? "tram" : g === "Füniküler" ? "fun" : g === "Teleferik" ? "tf" : "metro";
-      html += `<div class="baslik-satir"><h2>${g}</h2><span class="soluk">${l.length} hat</span></div>`;
+      html += `<div class="baslik-satir"><h2>${esc(t(g.i18n))}</h2><span class="soluk">${esc(t("nearby.linesCount", { n: l.length }))}</span></div>`;
       html += `<div class="liste">${l
         .map(
           (h) => `
-          <div class="kart satir tik" data-rhat="${esc(h.id)}">
+          <div class="kart satir tik" role="button" tabindex="0" data-rhat="${esc(h.id)}">
             <div class="kart-sol">
               <div class="bas">
-                <span class="rozet" style="background:${esc(h.renk)}">${iconSvg(ikonAd, 13)} ${esc(h.ad)}</span>
+                <span class="rozet" style="${accessibleBadgeStyle(h.renk)}">${iconSvg(g.icon, 13)} ${esc(h.ad)}</span>
                 <span>${esc(h.uzun.replace(/\s*(Metro|Tramvay|Füniküler|Teleferik)?\s*Hattı$/i, ""))}</span>
               </div>
               <div class="alt">
-                ${h.ilk && h.son ? `İlk ${esc(h.ilk)} · Son ${esc(h.son)}` : ""}
-                ${durum.some((d) => d.hatId === h.id) ? " · ⚠️ Duyuru var" : ""}
+                ${h.ilk && h.son ? esc(t("rail.firstLast", { first: h.ilk, last: h.son })) : ""}
+                ${durum.some((d) => d.hatId === h.id) ? ` · ⚠️ ${esc(t("rail.hasAlert"))}` : ""}
               </div>
             </div>
             <div class="kart-sag">${iconSvg("chevronRight", 16)}</div>
@@ -164,7 +177,7 @@ export function createRailView(S, mc, callbacks) {
     const hatlar = await API.metro.hatlar();
     const hat = hatlar.find((h) => h.id === p.id);
     if (!hat) {
-      return callbacks.baslikHTML("Hat Bulunamadı", true) + `<div class="bos">Raylı sistem hattı bulunamadı.</div>`;
+      return callbacks.baslikHTML(esc(t("rail.lineNotFound")), true) + `<div class="bos">${esc(t("rail.lineNotFoundDesc"))}</div>`;
     }
     if (ilk) {
       callbacks.onYukle(esc(hat.ad), true);
@@ -206,20 +219,20 @@ export function createRailView(S, mc, callbacks) {
     if (S.ben && ist.length) yakinId = ist[Core.enYakinIndex(ist, S.ben).index].id;
 
     let html = callbacks.baslikHTML(
-      `<span class="rozet" style="background:${esc(hat.renk)}">${esc(hat.ad)}</span> <span style="font-size:15px">${esc(hat.uzun)}</span>`,
+      `<span class="rozet" style="${accessibleBadgeStyle(hat.renk)}">${esc(hat.ad)}</span> <span style="font-size:15px">${esc(hat.uzun)}</span>`,
       true
     );
     html += durum
       .map((d) => `<div class="duyuru"><span class="duyuru-ikon">${iconSvg("alert", 18)}</span><span>${esc(d.metin)}</span></div>`)
       .join("");
-    html += `<div class="alt" style="margin-bottom:8px">İlk ${esc(hat.ilk || "–")} · Son ${esc(hat.son || "–")}${
-      p.trenSayisi != null ? ` · Haritada ${p.trenSayisi} tahmini tren` : ""
+    html += `<div class="alt" style="margin-bottom:8px">${esc(t("rail.firstLast", { first: hat.ilk || "–", last: hat.son || "–" }))}${
+      p.trenSayisi != null ? ` · ${esc(t("rail.estTrainsOnMap", { n: p.trenSayisi }))}` : ""
     }</div>`;
-    html += `<div class="baslik-satir"><h2>İstasyonlar (${ist.length})</h2><span class="soluk">Seferler için dokunun</span></div>`;
+    html += `<div class="baslik-satir"><h2>${esc(t("rail.stationsHeading", { n: ist.length }))}</h2><span class="soluk">${esc(t("rail.tapForTimes"))}</span></div>`;
     html += `<div class="kart"><ol class="duraklar">${ist
       .map(
         (s) =>
-          `<li data-ist="${esc(s.id)}" class="tik ${s.id === yakinId ? "aktif" : ""}"><span>${esc(s.ad)}</span>${
+          `<li data-ist="${esc(s.id)}" role="button" tabindex="0" class="tik ${s.id === yakinId ? "aktif" : ""}"><span>${esc(s.ad)}</span>${
             s.id === yakinId ? `<span class="sure yakin">${metre(Core.mesafe(S.ben, s))}</span>` : ""
           }</li>`
       )
@@ -263,12 +276,12 @@ export function createRailView(S, mc, callbacks) {
       `<span class="rozet marmaray">${iconSvg("marmaray", 14)} MR</span> <span style="font-size:15px">Marmaray (Gebze – Halkalı)</span>`,
       true
     );
-    html += `<div class="alt" style="margin-bottom:8px">06:00 – 00:00 · 8 dk / 15 dk aralık · Haritada ${p.trenSayisi ?? 0} tahmini tren</div>`;
-    html += `<div class="baslik-satir"><h2>İstasyonlar (${ist.length})</h2><span class="soluk">Seferler için dokunun</span></div>`;
+    html += `<div class="alt" style="margin-bottom:8px">${esc(t("rail.marmarayLineMeta", { n: p.trenSayisi ?? 0 }))}</div>`;
+    html += `<div class="baslik-satir"><h2>${esc(t("rail.stationsHeading", { n: ist.length }))}</h2><span class="soluk">${esc(t("rail.tapForTimes"))}</span></div>`;
     html += `<div class="kart"><ol class="duraklar">${ist
       .map(
         (s) =>
-          `<li data-ist="${esc(s.id)}" class="tik ${s.id === yakinId ? "aktif" : ""}"><span>${esc(s.ad)}</span>${
+          `<li data-ist="${esc(s.id)}" role="button" tabindex="0" class="tik ${s.id === yakinId ? "aktif" : ""}"><span>${esc(s.ad)}</span>${
             s.id === yakinId ? `<span class="sure yakin">${metre(Core.mesafe(S.ben, s))}</span>` : ""
           }</li>`
       )
@@ -285,7 +298,7 @@ export function createRailView(S, mc, callbacks) {
     const s = tum.find((x) => x.id === p.id);
     const hat = s && hatlar.find((h) => h.id === s.hatId);
     if (!s || !hat) {
-      return callbacks.baslikHTML("İstasyon Bulunamadı", true) + `<div class="bos">İstasyon verisi alınamadı.</div>`;
+      return callbacks.baslikHTML(esc(t("rail.stationNotFound")), true) + `<div class="bos">${esc(t("rail.stationDataError"))}</div>`;
     }
 
     if (ilk) {
@@ -304,23 +317,23 @@ export function createRailView(S, mc, callbacks) {
 
     const yonler = await API.metro.yonler(s.hatId);
     const ss = await Promise.all(
-      yonler.map((y) => API.metro.saatler(s.id, s.hatId, y.id).then((t) => ({ y, t }), (e) => ({ y, e })))
+      yonler.map((y) => API.metro.saatler(s.id, s.hatId, y.id).then((res) => ({ y, t: res }), (e) => ({ y, e })))
     );
     if (no !== callbacks.getCizimNo()) return null;
 
     const aktarma = tum.filter((x) => x.hatId !== s.hatId && Core.mesafe(x, s) < 250);
-    let html = callbacks.baslikHTML(`<span class="rozet" style="background:${esc(hat.renk)}">${esc(hat.ad)}</span> ${esc(s.ad)}`, true);
-    if (S.ben) html += `<div class="alt" style="margin-bottom:8px">Size ${metre(Core.mesafe(S.ben, s))} uzakta</div>`;
+    let html = callbacks.baslikHTML(`<span class="rozet" style="${accessibleBadgeStyle(hat.renk)}">${esc(hat.ad)}</span> ${esc(s.ad)}`, true);
+    if (S.ben) html += `<div class="alt" style="margin-bottom:8px">${esc(t("rail.distanceFromYou", { m: metre(Core.mesafe(S.ben, s)) }))}</div>`;
 
-    for (const { y, t, e } of ss) {
-      html += `<div class="baslik-satir"><h2>→ ${esc(t?.hedef || y.ad.split("->").pop())}</h2></div><div class="kart" style="margin-bottom:10px">`;
+    for (const { y, t: tt, e } of ss) {
+      html += `<div class="baslik-satir"><h2>→ ${esc(tt?.hedef || y.ad.split("->").pop())}</h2></div><div class="kart" style="margin-bottom:10px">`;
       if (e) {
         html += `<div class="duyuru hata"><span class="duyuru-ikon">${iconSvg("alert", 16)}</span><span>${esc(hataMesaji(e))}</span></div>`;
-      } else if (!t.saatler.length) {
-        html += `<div class="alt">Bu yönde yakın zamanda sefer yok.</div>`;
+      } else if (!tt.saatler.length) {
+        html += `<div class="alt">${esc(t("rail.noUpcoming"))}</div>`;
       } else {
-        html += `<div class="alt">Sıradaki tren <b style="color:var(--yazi)">${esc(t.saatler[0])}</b> · ${Zaman.kalanYazi(Zaman.kalan(t.saatler[0]))} sonra</div>`;
-        html += `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">${t.saatler
+        html += `<div class="alt">${esc(t("rail.nextTrain"))} <b style="color:var(--yazi)">${esc(tt.saatler[0])}</b> · ${Zaman.kalanYazi(Zaman.kalan(tt.saatler[0]))} ${esc(t("bus.later"))}</div>`;
+        html += `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">${tt.saatler
           .map((x, i) => `<span class="sure ${i === 0 ? "" : "tarife"}">${esc(x)}</span>`)
           .join("")}</div>`;
       }
@@ -328,10 +341,10 @@ export function createRailView(S, mc, callbacks) {
     }
 
     if (aktarma.length) {
-      html += `<div class="baslik-satir"><h2>Aktarma</h2></div><div class="liste">${aktarma
+      html += `<div class="baslik-satir"><h2>${esc(t("rail.transfers"))}</h2></div><div class="liste">${aktarma
         .map((x) => {
           const h = hatlar.find((q) => q.id === x.hatId);
-          return `<div class="kart satir tik" data-ist="${esc(x.id)}"><div class="kart-sol"><div class="bas"><span class="rozet" style="background:${esc(h?.renk || "#333")}">${esc(x.hat)}</span> ${esc(x.ad)}</div></div><div class="kart-sag">${iconSvg("chevronRight", 16)}</div></div>`;
+          return `<div class="kart satir tik" role="button" tabindex="0" data-ist="${esc(x.id)}"><div class="kart-sol"><div class="bas"><span class="rozet" style="${accessibleBadgeStyle(h?.renk || "#333333")}">${esc(x.hat)}</span> ${esc(x.ad)}</div></div><div class="kart-sag">${iconSvg("chevronRight", 16)}</div></div>`;
         })
         .join("")}</div>`;
     }
@@ -349,7 +362,7 @@ export function createRailView(S, mc, callbacks) {
     const idx = ist.findIndex((s) => s.ad === ad);
     const s = ist[idx];
     if (!s) {
-      return callbacks.baslikHTML("Marmaray İstasyonu", true) + `<div class="bos">İstasyon bulunamadı.</div>`;
+      return callbacks.baslikHTML(esc(t("rail.marmarayStation")), true) + `<div class="bos">${esc(t("rail.stationNotFoundDesc"))}</div>`;
     }
 
     if (ilk) {
@@ -368,7 +381,7 @@ export function createRailView(S, mc, callbacks) {
     const aktarma = (metroIst || []).filter((x) => Core.mesafe(x, s) < 350);
 
     let html = callbacks.baslikHTML(`<span class="rozet marmaray">${iconSvg("marmaray", 14)} MR</span> ${esc(s.ad)}`, true);
-    if (S.ben) html += `<div class="alt" style="margin-bottom:8px">Size ${metre(Core.mesafe(S.ben, s))} uzakta</div>`;
+    if (S.ben) html += `<div class="alt" style="margin-bottom:8px">${esc(t("rail.distanceFromYou", { m: metre(Core.mesafe(S.ben, s)) }))}</div>`;
 
     const yonKutu = (baslik, liste) => {
       if (!liste.length) return "";
@@ -376,26 +389,26 @@ export function createRailView(S, mc, callbacks) {
       return `
         <div class="baslik-satir"><h2>→ ${esc(baslik)}</h2><span class="soluk">${esc(ilkK.tur)}</span></div>
         <div class="kart" style="margin-bottom:10px">
-          <div class="alt">Sıradaki tren <b style="color:var(--yazi)">${saat(ilkK.dk)}</b> · ${Zaman.kalanYazi(ilkK.dk - simdi)} sonra</div>
+          <div class="alt">${esc(t("rail.nextTrain"))} <b style="color:var(--yazi)">${saat(ilkK.dk)}</b> · ${Zaman.kalanYazi(ilkK.dk - simdi)} ${esc(t("bus.later"))}</div>
           <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">
-            ${liste.map((t, i) => `<span class="sure ${i === 0 ? "" : "tarife"}">${saat(t.dk)}</span>`).join("")}
+            ${liste.map((item, i) => `<span class="sure ${i === 0 ? "" : "tarife"}">${saat(item.dk)}</span>`).join("")}
           </div>
         </div>`;
     };
 
-    html += yonKutu("Halkalı yönü", halkali);
-    html += yonKutu("Gebze yönü", gebze);
+    html += yonKutu(t("rail.dirTo", { dest: "Halkalı" }), halkali);
+    html += yonKutu(t("rail.dirTo", { dest: "Gebze" }), gebze);
 
     if (aktarma.length) {
-      html += `<div class="baslik-satir"><h2>Aktarma</h2></div><div class="liste">${aktarma
+      html += `<div class="baslik-satir"><h2>${esc(t("rail.transfers"))}</h2></div><div class="liste">${aktarma
         .map((x) => {
           const h = hatMap.get(x.hatId);
-          return `<div class="kart satir tik" data-ist="${esc(x.id)}"><div class="kart-sol"><div class="bas"><span class="rozet" style="background:${esc(h?.renk || "#333")}">${esc(x.hat)}</span> ${esc(x.ad)}</div></div><div class="kart-sag">${iconSvg("chevronRight", 16)}</div></div>`;
+          return `<div class="kart satir tik" role="button" tabindex="0" data-ist="${esc(x.id)}"><div class="kart-sol"><div class="bas"><span class="rozet" style="${accessibleBadgeStyle(h?.renk || "#333333")}">${esc(x.hat)}</span> ${esc(x.ad)}</div></div><div class="kart-sag">${iconSvg("chevronRight", 16)}</div></div>`;
         })
         .join("")}</div>`;
     }
 
-    return html + `<p class="alt" style="margin-top:10px">Marmaray seferleri Pendik–Ataköy arası 8 dk, Gebze–Halkalı arası 15 dk aralıklarla işler.</p>`;
+    return html + `<p class="alt" style="margin-top:10px">${esc(t("rail.marmarayFootnote"))}</p>`;
   }
 
   return { renderList, renderLine, renderStation };

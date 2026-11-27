@@ -23,9 +23,9 @@
 
 ### Gereksinimler
 
-- **Node.js 20.10+ (20.x) veya 22+**. Aşağıdaki Wrangler komutları için **22.12+** gerekir.
-- **npm**. Windows PowerShell'de `npm`, yürütme ilkesiyle engellenirse `npm.cmd` kullanın (örn. `npm.cmd run build`).
-- Android derlemesi için ek: **JDK 17**, **Android SDK**, (opsiyonel) **Android Studio**. `@capacitor/android` ve `@capacitor/cli` `devDependencies` içindedir; harici `cap` kurulumu gerekmez.
+- **Node.js 22+**. Aşağıdaki Wrangler komutları için **22.12+** gerekir.
+- **npm**. Windows PowerShell'de yürütme ilkesi betikleri engellerse `npm.cmd` ve `npx.cmd` kullanın.
+- Android derlemesi için **JDK 21**, **Android SDK Platform 36** ve **SDK Build-Tools 35.0.0** gerekir. IDE kullanıyorsanız **Android Studio Otter (2025.2.1) veya üstünü** kullanın. `@capacitor/android` ve `@capacitor/cli` `devDependencies` içindedir. Capacitor CLI'ı `npx cap` ile çalıştırabilirsiniz.
 
 ### 1) Bağımlılıkları kur
 
@@ -63,10 +63,10 @@ npm start         # yerel Node sunucusu — statik dosyalar ve API (127.0.0.1:41
 npm test
 ```
 
-`npm test` önce `npm run build`, ardından `node tests/verify-all.mjs` çalıştırır. Birim testlerini (Zaman, geo `Core`, Marmaray, rota motoru `Plan`), yerel sunucu ve proxy kontrollerini (`/health` ve SSRF allowlist 403 dahil) ve sürüm artefaktı kontrollerini kapsar. İETT `GetDuyurular_json`, Şehir Hatları ve İSPARK için varsayılan test sabit yerel yanıtlar kullanır ve internet bağlantısı gerektirmez.
+`npm test` önce `npm run build`, ardından `node tests/verify-all.mjs` çalıştırır. Birim testlerini (Zaman, geo `Core`, Marmaray, rota motoru `Plan`), yerel sunucu ve proxy kontrollerini (`/health` ve SSRF allowlist 403 dahil), Android APK kontrolünü ve `tests/smoke/` altındaki PWA ve platform duman testlerini kapsar. İETT `GetDuyurular_json`, Şehir Hatları ve İSPARK için varsayılan test sabit yerel yanıtlar kullanır ve internet bağlantısı gerektirmez.
 
 - `npm test -- --live` İETT, Şehir Hatları ve İSPARK kontrollerini canlı servislerle çalıştırır ve internet bağlantısı gerektirir.
-- `npm test -- --require-apk` Android APK dosyasının bulunmasını zorunlu kılar. Varsayılan test APK'yı varsa doğrular, dosya yoksa ilgili kontrolü atlar. Depodaki `releases/Istanbul-Ulasim-v4.0-iOS-Scriptable.js` dosyası her çalıştırmada doğrulanır. Artefakt adlarındaki `v4.0` tarihsel dosya adının parçasıdır.
+- `npm test -- --require-apk` Gradle'ın `android/app/build/outputs/apk/debug/app-debug.apk` çıktısını zorunlu kılar. Varsayılan test APK'yı varsa doğrular, dosya yoksa ilgili kontrolü atlar.
 
 `node tests/benchmark-and-verify.mjs` ayrı performans ve ek kontrol betiğidir.
 
@@ -76,21 +76,21 @@ npm test
 | --- | --- | --- |
 | `npm run icons` | `icons` | `sharp` ile `assets-src/icon-master.png`'den PWA/Android ikonlarını `public/icons/`'a üretir. |
 | `node scripts/build-static-data.mjs` | — (npm script yok) | İETT/Vapur/İSPARK verisini çekip `public/data/*.json` statik fallback dosyalarını yeniden üretir (canlı ağ gerekir). |
-| `npm run build:scriptable` | `build:scriptable` | Önce `npm run build`; `dist/` çıktısını tek dosya Scriptable paketine dönüştürür → `releases/`. **Faz 5'te kaldırılacak.** |
 
 ---
 
 ## Capacitor Android build
 
-Proje **Capacitor 6** (`@capacitor/core`, `@capacitor/android`, `@capacitor/cli`, `@capacitor/app`, `@capacitor/geolocation`, `@capacitor/status-bar`). Konfigürasyon `capacitor.config.json`:
+Proje **Capacitor 8** (`@capacitor/core`, `@capacitor/android`, `@capacitor/cli`, `@capacitor/app`, `@capacitor/geolocation`, `@capacitor/status-bar`). Yapılandırma `capacitor.config.json` dosyasındadır.
 
 - `appId`: `com.berk.istanbululasim`
 - `appName`: `İstanbul Ulaşım`
 - `webDir`: `dist`
 - `server.androidScheme`: `https`
+- `SystemBars.initialViewportFitValueHint`: `cover` (HTML'deki `viewport-fit=cover` ile uyumlu)
 - `CapacitorHttp.enabled`: `false` (web fetch + proxy yolu kullanılır)
 
-Native proje **`android/`** dizinindedir (`namespace`/`applicationId` `com.berk.istanbululasim`, `minSdkVersion 22`, `targetSdkVersion 34`, `compileSdkVersion 34`, Gradle; `gradlew`/`gradlew.bat` dahil). Web varlıkları derleme sırasında `dist/`'ten kopyalanır.
+Native proje **`android/`** dizinindedir. Uygulama kimliği `com.berk.istanbululasim`, minimum sürüm **Android 7.0 (API 24)**, derleme ve hedef SDK sürümü **API 36**'dır. Proje **Gradle Wrapper 8.14.3** ve **Android Gradle Plugin 8.13.0** kullanır. `cap sync` web varlıklarını `dist/` dizininden kopyalar.
 
 ### Adımlar
 
@@ -101,7 +101,7 @@ npx cap sync android   # dist/ + plugin'leri android/ içine kopyala
 npx cap open android   # Android Studio'da aç; oradan APK/AAB üret
 ```
 
-Android Studio olmadan CLI ile (JDK 17 + Android SDK; `ANDROID_HOME`/`ANDROID_SDK_ROOT` tanımlı olmalı):
+Komut satırında `JAVA_HOME` değişkenini JDK 21 dizinine, `ANDROID_HOME` değişkenini Android SDK dizinine ayarlayın.
 
 ```sh
 npx cap sync android
@@ -111,7 +111,7 @@ cd android
 ./gradlew assembleRelease    # Windows PowerShell: .\gradlew.bat assembleRelease
 ```
 
-Çıktılar tipik olarak `android/app/build/outputs/apk/debug/app-debug.apk` ve `.../release/`. Konum izni `@capacitor/geolocation` ile istenir; `App.backButton` ve `StatusBar` köprüsü `src/main.js`/`src/core/bridge.js` içindedir. `npm test -- --require-apk` APK'yı `releases/Istanbul-Ulasim-v4.0-Android.apk` yolunda arar.
+Çıktılar `android/app/build/outputs/apk/debug/app-debug.apk` ve `.../release/` altında yer alır. Konum izni `@capacitor/geolocation` ile istenir. `App.backButton` ve `StatusBar` köprüsü `src/main.js`/`src/core/bridge.js` içindedir. Debug APK'yı doğrulamak için proje kökünden `npm test -- --require-apk` komutunu çalıştırın.
 
 ---
 
@@ -123,7 +123,7 @@ cd android
 ├── docs/
 │   └── ARCHITECTURE.md           # mimari ayrıntılar
 ├── index.html                    # giriş sayfası (Vite kökü)
-├── capacitor.config.json         # Capacitor 6 konfigürasyonu
+├── capacitor.config.json         # Capacitor 8 yapılandırması
 ├── vite.config.js                # Vite 6, /api/proxy dev yönlendirmesi, dist çıktısı
 ├── package.json                  # scriptler ve bağımlılıklar
 │
@@ -131,7 +131,7 @@ cd android
 │   ├── main.js                   # önyükleme, yönlendirme (S.yigin), olaylar, periyodik canlı döngüler, PWA
 │   ├── core/                     # platformdan bağımsız çekirdek
 │   │   ├── api.js                # API sağlayıcıları: iett, metro, marmaray, vapur, trafik, iskeleler, ispark, transitous, ag; MARMARAY_STATIONS
-│   │   ├── bridge.js             # Bridge: runtime tespiti (web/capacitor/scriptable/node), http, proxy URL, konum
+│   │   ├── bridge.js             # Bridge: runtime tespiti (web/capacitor/node), http, proxy URL, konum
 │   │   ├── geo.js                # Core: mesafe, yön, geometri (haritadan bağımsız)
 │   │   ├── router.js             # Plan: rota planlayıcı v5 (çok bacaklı A*, aktarma, ETA)
 │   │   ├── storage.js            # KV: IndexedDB + localStorage fallback kalıcı depolama
@@ -170,8 +170,7 @@ cd android
 │
 ├── scripts/                      # Node ESM yardımcı betikleri
 │   ├── build-static-data.mjs     # canlı kaynaklardan public/data/*.json üretir (npm script yok)
-│   ├── generate-icons.mjs        # npm run icons
-│   └── build-scriptable.mjs      # npm run build:scriptable (Faz 5'te kaldırılacak)
+│   └── generate-icons.mjs        # npm run icons
 │
 ├── functions/
 │   └── api/proxy.js              # Cloudflare Pages Function adapter'ı
@@ -187,9 +186,6 @@ cd android
 ├── wrangler.jsonc               # Cloudflare Pages yapılandırması
 │
 ├── android/                      # Capacitor native Android projesi
-├── İstanbul Ulaşım.js            # Scriptable v3.8 tek dosya uygulaması (Faz 5'te kaldırılacak)
-├── legacy/İstanbul Ulaşım.v3.8.js# Scriptable legacy kopya (Faz 5'te kaldırılacak)
-├── releases/                     # Scriptable/APK sürüm artefaktları
 ├── assets-src/                   # ikon kaynağı (icon-master.png)
 ├── tests/                        # verify-all.mjs + benchmark-and-verify.mjs
 └── ...                            # package-lock.json, .gitignore
@@ -215,7 +211,6 @@ Canlı kaynak başarısız olursa `src/core/api.js` `fetchStaticJson()` ile `./d
 1. **Arayüz** (`src/views`, `src/map`) `src/core/api.js` (`API.*`) çağırır.
 2. `api.js`, `src/core/bridge.js` `Bridge.http()` ile istek yapar. `API` kendi katmanlı önbelleğini (bellek + `KV` IndexedDB, `cached()`) kullanır; `DataProvider` ek SWR + in-flight coalescing + sağlayıcı sağlığı ekler.
 3. **Proxy kararı** (`Bridge.http`):
-   - **Scriptable** (`window.__SCRIPTABLE__`): native köprü — Faz 5'te kaldırılacak.
    - **Capacitor**: `CapacitorHttp` denenir; hata olursa `customProxyBase + /api/proxy`.
    - **Web/PWA**: bazı host'lara doğrudan (`isDirectCorsHost`: `api.ibb.gov.tr/MetroIstanbul`, `tkmservices.ibb.gov.tr`, `api.transitous.org`); aksi halde `customProxyBase ? <base>/api/proxy : ./api/proxy`. `404/405` → `proxyMissing` → "Static hosting (proxy yok)" ve statik fallback. `customProxyBase` kullanıcı ayarı `ulasim.proxyUrl` / `KV proxyUrl`.
    - **Node**: doğrudan `fetch`.
@@ -244,10 +239,10 @@ SSE, filo, metrikler ve Google Maps uçları `npm start` ile açılan yerel Node
 
 ## Planlanan değişiklikler
 
-- **Faz 5:** Scriptable kaynakları, derleme komutu, yerel köprü ve artefakt testleri kaldırılacak.
+- Statik yedek verileri elle yenilemek için `npm run data` komutunun eklenmesi öneriliyor. Mevcut komut `node scripts/build-static-data.mjs`.
 
 ---
 
 ## Doğrulama
 
-README'deki `npm` komutlarının `package.json` `scripts`'leriyle eşleştiği kontrol edilebilir (bkz. `package.json`: `dev`, `build`, `preview`, `start`, `icons`, `build:scriptable`, `test`).
+README'deki `npm` komutlarının `package.json` `scripts`'leriyle eşleştiği kontrol edilebilir (bkz. `package.json`: `dev`, `build`, `preview`, `start`, `icons`, `test`).
