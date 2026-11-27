@@ -11,9 +11,41 @@ import { t, getLang, setLang } from "../i18n/index.js";
 import { DataProvider } from "../engines/dataProvider.js";
 import { GoogleMapsService } from "../services/googleMapsService.js";
 import { esc, bas, metre, saat, renkKod, sureEtiket, hataMesaji } from "../map/mapController.js";
+import { accessibleBadgeStyle, bindKeyboardActivators } from "./a11y.js";
+
+const FOCUSABLE_SELECTOR = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])',
+].join(",");
+
+const BACKGROUND_REGIONS = ["#harita", ".harita-ust-sol", ".harita-ust-sag", "#secimBandi", "#panel", "#sekmeler"];
 
 export function createStopModal(S, mc, callbacks) {
+  bindKeyboardActivators();
   const modalEl = () => document.querySelector("#altModal");
+  let previousFocus = null;
+
+  function setBackgroundHidden(hidden) {
+    for (const sel of BACKGROUND_REGIONS) {
+      const node = document.querySelector(sel);
+      if (!node) continue;
+      if (hidden) node.setAttribute("aria-hidden", "true");
+      else node.removeAttribute("aria-hidden");
+    }
+  }
+
+  function getFocusable(container) {
+    if (!container) return [];
+    return [...container.querySelectorAll(FOCUSABLE_SELECTOR)].filter((el) => {
+      if (el.hasAttribute("hidden")) return false;
+      const style = window.getComputedStyle(el);
+      return style.display !== "none" && style.visibility !== "hidden";
+    });
+  }
 
   function isOpen() {
     const el = modalEl();
@@ -23,15 +55,31 @@ export function createStopModal(S, mc, callbacks) {
   function close() {
     const el = modalEl();
     if (!el) return;
+    const wasOpen = !el.hasAttribute("hidden");
     el.setAttribute("hidden", "");
     el.innerHTML = "";
+    setBackgroundHidden(false);
+    if (wasOpen && previousFocus && typeof previousFocus.focus === "function" && previousFocus.isConnected) {
+      previousFocus.focus();
+    }
+    previousFocus = null;
   }
 
   function renderBox(html) {
     const el = modalEl();
     if (!el) return;
-    el.innerHTML = `<div class="alt-modal-kutu" role="dialog" aria-modal="true">${html}</div>`;
+    const alreadyOpen = !el.hasAttribute("hidden");
+    if (!alreadyOpen && document.activeElement instanceof HTMLElement) {
+      previousFocus = document.activeElement;
+    }
+    el.innerHTML = `<div class="alt-modal-kutu" role="dialog" aria-modal="true" aria-labelledby="modalBaslik" tabindex="-1">${html}</div>`;
     el.removeAttribute("hidden");
+    setBackgroundHidden(true);
+
+    const dialog = el.querySelector(".alt-modal-kutu");
+    const focusables = getFocusable(dialog);
+    if (focusables.length) focusables[0].focus();
+    else dialog?.focus();
   }
 
   // Backdrop click closes modal
@@ -43,28 +91,81 @@ export function createStopModal(S, mc, callbacks) {
     }
   });
 
+  // Escape key & Tab focus trap while modal is open
+  document.addEventListener("keydown", (e) => {
+    const el = modalEl();
+    if (!el || el.hasAttribute("hidden")) return;
+
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      close();
+      return;
+    }
+
+    if (e.key !== "Tab") return;
+    const dialog = el.querySelector(".alt-modal-kutu");
+    if (!dialog) return;
+    const focusables = getFocusable(dialog);
+    if (!focusables.length) {
+      e.preventDefault();
+      dialog.focus();
+      return;
+    }
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    const active = document.activeElement;
+
+    if (e.shiftKey) {
+      if (active === first || active === dialog || !dialog.contains(active)) {
+        e.preventDefault();
+        last.focus();
+      }
+    } else if (active === last || !dialog.contains(active)) {
+      e.preventDefault();
+      first.focus();
+    }
+  });
+
+  // Keep focus trapped if external focus event escapes the open dialog
+  document.addEventListener("focusin", (e) => {
+    const el = modalEl();
+    if (!el || el.hasAttribute("hidden")) return;
+    const dialog = el.querySelector(".alt-modal-kutu");
+    if (!dialog || dialog.contains(e.target)) return;
+    const focusables = getFocusable(dialog);
+    if (focusables.length) focusables[0].focus();
+    else dialog.focus();
+  });
+
   // ---------------- 1) Durak Kalkış Panosu ----------------
   function isFavStop(stop) {
     const list = S.favoriDuraklar || [];
-    return list.some((d) => (stop.kod && d.kod === stop.kod) || (stop.stopId && d.stopId === stop.stopId) || (d.ad === stop.ad && Core.mesafe(d, stop) < 40));
+    return list.some(
+      (d) =>
+        (stop.kod && d.kod === stop.kod) ||
+        (stop.stopId && d.stopId === stop.stopId) ||
+        (d.ad === stop.ad && Core.mesafe(d, stop) < 40)
+    );
   }
 
   async function openStopBoard(stop) {
-    const baslikAd = esc(bas(stop.ad || "Durak"));
+    const baslikAd = esc(bas(stop.ad || t("common.stop")));
     const mesafeYazi = S.ben && stop.lat ? ` · ${metre(Core.mesafe(S.ben, stop))}` : "";
     const favStop = isFavStop(stop);
+    const favLabel = favStop ? t("modal.favStopRemove") : t("modal.favStopAdd");
 
     renderBox(`
       <div class="modal-baslik">
         <div style="min-width:0;flex:1">
-          <h3>${iconSvg("busStop", 18)} ${baslikAd}</h3>
-          <div class="alt">${stop.kod ? `Durak ${esc(stop.kod)}` : esc(t("modal.stopBoard"))}${mesafeYazi}</div>
+          <h3 id="modalBaslik">${iconSvg("busStop", 18)} ${baslikAd}</h3>
+          <div class="alt">${stop.kod ? esc(t("common.stopCode", { kod: stop.kod })) : esc(t("modal.stopBoard"))}${mesafeYazi}</div>
         </div>
         <div style="display:flex;align-items:center;gap:6px">
-          <button class="btn kucuk ${favStop ? "birincil" : ""}" id="favDurakBtn" title="${esc(favStop ? t("modal.favStopRemove") : t("modal.favStopAdd"))}">
+          <button type="button" class="btn kucuk ${favStop ? "birincil" : ""}" id="favDurakBtn" title="${esc(favLabel)}" aria-label="${esc(favLabel)}" aria-pressed="${favStop ? "true" : "false"}">
             ${iconSvg(favStop ? "starFill" : "star", 15)}
           </button>
-          <button class="btn ikon" data-modal-kapat aria-label="${esc(t("common.close"))}">${iconSvg("close", 18)}</button>
+          <button type="button" class="btn ikon" data-modal-kapat aria-label="${esc(t("common.close"))}">${iconSvg("close", 18)}</button>
         </div>
       </div>
       <div id="modalGovde">
@@ -72,8 +173,8 @@ export function createStopModal(S, mc, callbacks) {
         <div class="skeleton skeleton-kart"></div>
       </div>
       <div style="display:flex;gap:8px;margin-top:12px">
-        <button class="btn" style="flex:1" data-durak-rota="nereden">${iconSvg("rota", 16)} ${esc(t("modal.routeFrom"))}</button>
-        <button class="btn birincil" style="flex:1" data-durak-rota="nereye">${iconSvg("konum", 16)} ${esc(t("modal.routeTo"))}</button>
+        <button type="button" class="btn" style="flex:1" data-durak-rota="nereden">${iconSvg("rota", 16)} ${esc(t("modal.routeFrom"))}</button>
+        <button type="button" class="btn birincil" style="flex:1" data-durak-rota="nereye">${iconSvg("konum", 16)} ${esc(t("modal.routeTo"))}</button>
       </div>
     `);
 
@@ -81,13 +182,20 @@ export function createStopModal(S, mc, callbacks) {
     favBtn?.addEventListener("click", () => {
       S.favoriDuraklar = S.favoriDuraklar || [];
       const idx = S.favoriDuraklar.findIndex(
-        (d) => (stop.kod && d.kod === stop.kod) || (stop.stopId && d.stopId === stop.stopId) || (d.ad === stop.ad && Core.mesafe(d, stop) < 40)
+        (d) =>
+          (stop.kod && d.kod === stop.kod) ||
+          (stop.stopId && d.stopId === stop.stopId) ||
+          (d.ad === stop.ad && Core.mesafe(d, stop) < 40)
       );
       if (idx >= 0) S.favoriDuraklar.splice(idx, 1);
       else S.favoriDuraklar.unshift({ kod: stop.kod || "", stopId: stop.stopId || "", ad: bas(stop.ad), lat: stop.lat, lon: stop.lon, tur: stop.tur || "otobus" });
       KV.set("favoriDuraklar", S.favoriDuraklar);
       const nowFav = idx < 0;
+      const nextLabel = nowFav ? t("modal.favStopRemove") : t("modal.favStopAdd");
       favBtn.classList.toggle("birincil", nowFav);
+      favBtn.setAttribute("aria-pressed", nowFav ? "true" : "false");
+      favBtn.setAttribute("aria-label", nextLabel);
+      favBtn.title = nextLabel;
       favBtn.innerHTML = iconSvg(nowFav ? "starFill" : "star", 15);
       if (callbacks.sayfa().tur === "yakin") callbacks.panelYenile();
     });
@@ -98,7 +206,7 @@ export function createStopModal(S, mc, callbacks) {
         const alan = btn.dataset.durakRota;
         const yer = {
           ad: bas(stop.ad),
-          alt: stop.kod ? `Durak ${stop.kod}` : "Durak",
+          alt: stop.kod ? t("common.stopCode", { kod: stop.kod }) : t("common.stop"),
           lat: stop.lat,
           lon: stop.lon,
           tur: stop.tur || "durak",
@@ -117,7 +225,7 @@ export function createStopModal(S, mc, callbacks) {
       const kalkislar = [];
       const simdi = Zaman.simdi();
 
-      // 1) Transitous stop times if available (scheduled + RT) — fix kalkisISO parsing
+      // 1) Transitous stop times if available (scheduled + RT)
       const trStopId = stop.stopId || stop.id;
       if (trStopId && typeof API.transitous?.durakSaatleri === "function") {
         try {
@@ -211,7 +319,7 @@ export function createStopModal(S, mc, callbacks) {
       }
 
       if (!tekil.length) {
-        govde.innerHTML = `<div class="bos">Bu durak için yaklaşan sefer bilgisi bulunamadı.</div>`;
+        govde.innerHTML = `<div class="bos">${esc(t("modal.noDepartures"))}</div>`;
         return;
       }
 
@@ -219,14 +327,14 @@ export function createStopModal(S, mc, callbacks) {
         .slice(0, 15)
         .map(
           (k) => `
-          <div class="kart satir tik" data-modal-hat="${esc(k.hat)}" ${k.kapino ? `data-modal-arac="${esc(k.kapino)}"` : ""}>
+          <div class="kart satir tik" role="button" tabindex="0" data-modal-hat="${esc(k.hat)}" ${k.kapino ? `data-modal-arac="${esc(k.kapino)}"` : ""}>
             <div class="kart-sol">
               <div class="bas">
-                <span class="rozet" style="background:${esc(k.renk)}">${esc(k.hat)}</span>
-                <span>→ ${esc(k.yon || "Merkez")}</span>
+                <span class="rozet" style="${accessibleBadgeStyle(k.renk)}">${esc(k.hat)}</span>
+                <span>→ ${esc(k.yon || t("modal.center"))}</span>
               </div>
               <div class="alt">
-                ${k.canli ? '<span class="canli">CANLI</span>' : '<span class="rozet soluk">Tarife</span>'}
+                ${k.canli ? `<span class="canli">${esc(t("common.live"))}</span>` : `<span class="rozet soluk">${esc(t("common.schedule"))}</span>`}
                 ${k.kapino ? `<span>${esc(k.kapino)}</span>` : ""}
                 ${k.saatStr ? `<span>· ${esc(k.saatStr)}</span>` : ""}
               </div>
@@ -262,28 +370,28 @@ export function createStopModal(S, mc, callbacks) {
     renderBox(`
       <div class="modal-baslik">
         <div>
-          <h3>${iconSvg("ispark", 18)} ${esc(bas(park.ad))}</h3>
+          <h3 id="modalBaslik">${iconSvg("ispark", 18)} ${esc(bas(park.ad))}</h3>
           <div class="alt">${esc(park.ilce || "İstanbul")}${park.tip ? ` · ${esc(park.tip)}` : ""}${mesafeYazi}</div>
         </div>
-        <button class="btn ikon" data-modal-kapat aria-label="Kapat">${iconSvg("close", 18)}</button>
+        <button type="button" class="btn ikon" data-modal-kapat aria-label="${esc(t("common.close"))}">${iconSvg("close", 18)}</button>
       </div>
       <div class="kart">
         <div class="bas" style="justify-content:space-between">
-          <span>Boş Kapasite</span>
-          <span class="sure ${bosOran > 0.3 ? "yakin" : ""}">${bos} / ${park.kapasite || "–"} yer</span>
+          <span>${esc(t("modal.isparkEmpty"))}</span>
+          <span class="sure ${bosOran > 0.3 ? "yakin" : ""}">${esc(t("modal.isparkSpaces", { empty: bos, cap: park.kapasite || "–" }))}</span>
         </div>
         <div class="doluluk-bar"><span style="width:${doluOran}%;background:${barRenk}"></span></div>
         <div class="alt" style="justify-content:space-between;margin-top:4px">
-          <span>Doluluk %${doluOran}</span>
-          <span>${park.isOpen ? "Açık" : "Kapalı"}</span>
+          <span>${esc(t("modal.isparkOccupancy", { pct: doluOran }))}</span>
+          <span>${esc(park.isOpen ? t("modal.isparkOpen") : t("modal.isparkClosed"))}</span>
         </div>
       </div>
       <div class="kart">
-        <div class="alt">${iconSvg("clock", 14)} Çalışma Saatleri: <b style="color:var(--yazi)">${esc(park.saatler || "24 Saat")}</b></div>
-        ${park.ucretsizDk ? `<div class="alt">Ücretsiz Süre: <b style="color:var(--yazi)">İlk ${esc(park.ucretsizDk)} dk</b></div>` : ""}
+        <div class="alt">${iconSvg("clock", 14)} ${esc(t("modal.isparkHours"))}: <b style="color:var(--yazi)">${esc(park.saatler || t("modal.ispark24h"))}</b></div>
+        ${park.ucretsizDk ? `<div class="alt">${esc(t("modal.isparkFree"))}: <b style="color:var(--yazi)">${esc(t("modal.isparkFirstMin", { n: park.ucretsizDk }))}</b></div>` : ""}
       </div>
       <div style="display:flex;gap:8px;margin-top:12px">
-        <button class="btn birincil" style="flex:1" id="isparkRotaBtn">${iconSvg("rota", 16)} Buraya Rota</button>
+        <button type="button" class="btn birincil" style="flex:1" id="isparkRotaBtn">${iconSvg("rota", 16)} ${esc(t("modal.isparkRoute"))}</button>
       </div>
     `);
 
@@ -291,7 +399,7 @@ export function createStopModal(S, mc, callbacks) {
       close();
       callbacks.setRoutePlace("nereye", {
         ad: bas(park.ad),
-        alt: "İSPARK Otopark",
+        alt: t("modal.isparkParking"),
         lat: park.lat,
         lon: park.lon,
         tur: "yer",
@@ -344,28 +452,28 @@ export function createStopModal(S, mc, callbacks) {
 
     renderBox(`
       <div class="modal-baslik">
-        <h3>${iconSvg("settings", 18)} ${esc(t("settings.title"))}</h3>
-        <button class="btn ikon" data-modal-kapat aria-label="${esc(t("common.close"))}">${iconSvg("close", 18)}</button>
+        <h3 id="modalBaslik">${iconSvg("settings", 18)} ${esc(t("settings.title"))}</h3>
+        <button type="button" class="btn ikon" data-modal-kapat aria-label="${esc(t("common.close"))}">${iconSvg("close", 18)}</button>
       </div>
 
       <div class="baslik-satir"><h3>${esc(t("settings.language"))}</h3></div>
-      <div class="segment" id="langSegment">
-        <button data-lang="tr" class="${lang === "tr" ? "aktif" : ""}">Türkçe</button>
-        <button data-lang="en" class="${lang === "en" ? "aktif" : ""}">English</button>
+      <div class="segment" id="langSegment" role="group" aria-label="${esc(t("settings.language"))}">
+        <button type="button" data-lang="tr" class="${lang === "tr" ? "aktif" : ""}" aria-pressed="${lang === "tr" ? "true" : "false"}">Türkçe</button>
+        <button type="button" data-lang="en" class="${lang === "en" ? "aktif" : ""}" aria-pressed="${lang === "en" ? "true" : "false"}">English</button>
       </div>
 
       <div class="baslik-satir"><h3>${esc(t("settings.theme"))}</h3></div>
-      <div class="segment" id="temaSegment">
-        <button data-tema="system" class="${tema === "system" ? "aktif" : ""}">${esc(t("settings.themeSystem"))}</button>
-        <button data-tema="light" class="${tema === "light" ? "aktif" : ""}">${iconSvg("sun", 15)} ${esc(t("settings.themeLight"))}</button>
-        <button data-tema="dark" class="${tema === "dark" ? "aktif" : ""}">${iconSvg("moon", 15)} ${esc(t("settings.themeDark"))}</button>
+      <div class="segment" id="temaSegment" role="group" aria-label="${esc(t("settings.theme"))}">
+        <button type="button" data-tema="system" class="${tema === "system" ? "aktif" : ""}" aria-pressed="${tema === "system" ? "true" : "false"}">${esc(t("settings.themeSystem"))}</button>
+        <button type="button" data-tema="light" class="${tema === "light" ? "aktif" : ""}" aria-pressed="${tema === "light" ? "true" : "false"}">${iconSvg("sun", 15)} ${esc(t("settings.themeLight"))}</button>
+        <button type="button" data-tema="dark" class="${tema === "dark" ? "aktif" : ""}" aria-pressed="${tema === "dark" ? "true" : "false"}">${iconSvg("moon", 15)} ${esc(t("settings.themeDark"))}</button>
       </div>
 
       <div class="baslik-satir"><h3>${esc(t("settings.mapStyle"))}</h3></div>
-      <div class="segment" id="haritaStilSegment">
-        <button data-stil="standart" class="${stil === "standart" ? "aktif" : ""}">${esc(t("settings.styleStandard"))}</button>
-        <button data-stil="sade" class="${stil === "sade" ? "aktif" : ""}">${esc(t("settings.styleClean"))}</button>
-        <button data-stil="osm" class="${stil === "osm" ? "aktif" : ""}">${esc(t("settings.styleOsm"))}</button>
+      <div class="segment" id="haritaStilSegment" role="group" aria-label="${esc(t("settings.mapStyle"))}">
+        <button type="button" data-stil="standart" class="${stil === "standart" ? "aktif" : ""}" aria-pressed="${stil === "standart" ? "true" : "false"}">${esc(t("settings.styleStandard"))}</button>
+        <button type="button" data-stil="sade" class="${stil === "sade" ? "aktif" : ""}" aria-pressed="${stil === "sade" ? "true" : "false"}">${esc(t("settings.styleClean"))}</button>
+        <button type="button" data-stil="osm" class="${stil === "osm" ? "aktif" : ""}" aria-pressed="${stil === "osm" ? "true" : "false"}">${esc(t("settings.styleOsm"))}</button>
       </div>
 
       <div class="baslik-satir"><h3>${esc(t("settings.providerHealth"))}</h3></div>
@@ -375,20 +483,20 @@ export function createStopModal(S, mc, callbacks) {
 
       <div class="baslik-satir"><h3>${esc(t("settings.proxy"))}</h3></div>
       <div class="kart" style="margin-bottom:10px">
-        <div class="alt">${esc(t("settings.proxyHint"))}</div>
+        <label class="alt" for="proxyInput">${esc(t("settings.proxyHint"))}</label>
         <div style="display:flex;gap:8px">
-          <input class="giris" id="proxyInput" placeholder="https://ornek.pages.dev" value="${esc(proxy)}">
-          <button class="btn" id="proxyKaydetBtn">${esc(t("common.save"))}</button>
+          <input class="giris" id="proxyInput" type="url" placeholder="https://ornek.pages.dev" value="${esc(proxy)}">
+          <button type="button" class="btn" id="proxyKaydetBtn">${esc(t("common.save"))}</button>
         </div>
       </div>
 
-      <div class="ayar-satir tik" id="cacheTemizleBtn">
-        <div class="ayar-bilgi">
+      <button type="button" class="ayar-satir tik" id="cacheTemizleBtn">
+        <span class="ayar-bilgi">
           <span class="ayar-baslik">${esc(t("settings.clearCache"))}</span>
           <span class="ayar-alt">${esc(t("settings.clearCacheDesc"))}</span>
-        </div>
-        <span class="btn kucuk">${iconSvg("refresh", 14)} ${esc(t("common.clear"))}</span>
-      </div>
+        </span>
+        <span class="btn kucuk" aria-hidden="true">${iconSvg("refresh", 14)} ${esc(t("common.clear"))}</span>
+      </button>
 
       <div class="kart" style="margin-top:12px">
         <div class="bas">İstanbul Ulaşım v5.0</div>
@@ -420,14 +528,22 @@ export function createStopModal(S, mc, callbacks) {
     document.querySelectorAll("#temaSegment button").forEach((b) => {
       b.addEventListener("click", () => {
         callbacks.applyTheme(b.dataset.tema);
-        document.querySelectorAll("#temaSegment button").forEach((x) => x.classList.toggle("aktif", x === b));
+        document.querySelectorAll("#temaSegment button").forEach((x) => {
+          const active = x === b;
+          x.classList.toggle("aktif", active);
+          x.setAttribute("aria-pressed", active ? "true" : "false");
+        });
       });
     });
 
     document.querySelectorAll("#haritaStilSegment button").forEach((b) => {
       b.addEventListener("click", () => {
         applyMapStyle(S, mc, b.dataset.stil);
-        document.querySelectorAll("#haritaStilSegment button").forEach((x) => x.classList.toggle("aktif", x === b));
+        document.querySelectorAll("#haritaStilSegment button").forEach((x) => {
+          const active = x === b;
+          x.classList.toggle("aktif", active);
+          x.setAttribute("aria-pressed", active ? "true" : "false");
+        });
       });
     });
 

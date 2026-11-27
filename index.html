@@ -2,8 +2,10 @@
 <html lang="tr">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="Canlı İETT otobüs/metrobüs, Metro İstanbul, Marmaray, Şehir Hatları vapur, İSPARK ve akıllı rota planlayıcı">
   <meta name="theme-color" content="#0f62fe">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>İstanbul Ulaşım</title>
@@ -16,63 +18,64 @@
   <link rel="stylesheet" href="/src/styles/map.css">
 </head>
 <body>
-  <div id="harita"></div>
+  <h1 class="sr-only">İstanbul Ulaşım</h1>
+  <div id="harita" role="region" aria-label="İstanbul ulaşım haritası"></div>
 
   <div class="harita-ust-sol">
-    <div id="trafikBilgi"></div>
-    <div id="isparkBilgi"></div>
+    <div id="trafikBilgi" role="status" aria-live="polite"></div>
+    <div id="isparkBilgi" role="status" aria-live="polite"></div>
   </div>
 
   <div class="harita-ust-sag">
-    <button id="trafikBtn" title="Trafik Yoğunluğu" aria-label="Trafik Yoğunluğu">
+    <button type="button" id="trafikBtn" title="Trafik Yoğunluğu" aria-label="Trafik Yoğunluğu">
       <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2" width="10" height="20" rx="3"/><circle cx="12" cy="7" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="17" r="1.7" fill="currentColor" stroke="none"/></svg>
     </button>
-    <button id="isparkBtn" title="İSPARK Otoparklar" aria-label="İSPARK Otoparklar">
+    <button type="button" id="isparkBtn" title="İSPARK Otoparklar" aria-label="İSPARK Otoparklar">
       <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="3"/><path d="M9.5 16V8h3.5a2.5 2.5 0 0 1 0 5H9.5"/></svg>
     </button>
-    <button id="katmanBtn" title="Harita &amp; Görünüm" aria-label="Harita &amp; Görünüm">
+    <button type="button" id="katmanBtn" title="Harita &amp; Görünüm" aria-label="Harita &amp; Görünüm">
       <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 12 12 17 22 12"/><polyline points="2 17 12 22 22 17"/></svg>
     </button>
-    <button id="konumBtn" title="Konumum" aria-label="Konumum">
+    <button type="button" id="konumBtn" title="Konumum" aria-label="Konumum">
       <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
     </button>
   </div>
 
-  <div id="secimBandi">Haritada bir noktaya dokunun <button class="btn kucuk" id="secimIptal">Vazgeç</button></div>
+  <div id="secimBandi" role="status" aria-live="polite"><span id="secimBandiYazi">Haritada bir noktaya dokunun</span> <button type="button" class="btn kucuk" id="secimIptal">Vazgeç</button></div>
 
-  <div id="panel">
-    <div id="tutamak" title="Yukarı/aşağı kaydır"><span></span></div>
+  <main id="panel" aria-label="Ulaşım paneli">
+    <button type="button" id="tutamak" title="Panel yüksekliğini değiştir" aria-label="Panel yüksekliğini değiştir"><span></span></button>
     <div id="icerik"></div>
-  </div>
+  </main>
 
   <div id="altModal" class="alt-modal" hidden></div>
 
   <nav id="sekmeler" aria-label="Ana menü">
-    <button data-sekme="yakin" class="aktif">
+    <button type="button" data-sekme="yakin" class="aktif">
       <span class="nav-ikon">
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3"/><path d="M12 19v3"/><path d="M2 12h3"/><path d="M19 12h3"/><circle cx="12" cy="12" r="8" stroke-dasharray="2 3"/></svg>
       </span>
       <span>Yakınımda</span>
     </button>
-    <button data-sekme="rota">
+    <button type="button" data-sekme="rota">
       <span class="nav-ikon">
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="19" r="2.5"/><circle cx="18" cy="5" r="2.5"/><path d="M8.5 19H14a4 4 0 0 0 0-8H10a4 4 0 0 1 0-8h5.5"/></svg>
       </span>
       <span>Rota</span>
     </button>
-    <button data-sekme="otobus">
+    <button type="button" data-sekme="otobus">
       <span class="nav-ikon">
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 17v2a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-2"/><path d="M21 17v2a1 1 0 0 1-1 1h-1a1 1 0 0 1-1-1v-2"/><rect x="3" y="4" width="18" height="13" rx="3"/><path d="M3 11h18"/><circle cx="7.5" cy="14" r="1" fill="currentColor" stroke="none"/><circle cx="16.5" cy="14" r="1" fill="currentColor" stroke="none"/><path d="M8 4v-1a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v1"/></svg>
       </span>
       <span>Otobüs</span>
     </button>
-    <button data-sekme="rayli">
+    <button type="button" data-sekme="rayli">
       <span class="nav-ikon">
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="15" rx="4"/><path d="M5 11h14"/><circle cx="8.5" cy="14.5" r="1" fill="currentColor" stroke="none"/><circle cx="15.5" cy="14.5" r="1" fill="currentColor" stroke="none"/><path d="M8 18l-2 3"/><path d="M16 18l2 3"/><path d="M9 6h6"/></svg>
       </span>
       <span>Raylı</span>
     </button>
-    <button data-sekme="vapur">
+    <button type="button" data-sekme="vapur">
       <span class="nav-ikon">
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15l1.5-6h13L20 15"/><path d="M9 9V5h6v4"/><path d="M12 5V3"/><path d="M2 18c2 1.5 4 1.5 6 0s4-1.5 6 0 4 1.5 6 0 2.5-.5 2-1l-1.5-2H3.5L2 17c-.5.5 0 1 0 1z"/></svg>
       </span>

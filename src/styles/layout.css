@@ -34,6 +34,23 @@ textarea {
   color: inherit;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+:focus-visible {
+  outline: 2.5px solid var(--odak);
+  outline-offset: 2px;
+}
+
 /* Tabular numbers for all times, ETAs, distances, counts */
 time,
 .sure,
@@ -141,6 +158,12 @@ body.tam #harita {
   transform: scale(0.93);
 }
 
+.harita-ust-sag button:focus-visible {
+  outline: 2.5px solid var(--odak);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--odak-halka), var(--golge-hafif);
+}
+
 .harita-ust-sag button.aktif {
   background: var(--vurgu);
   color: var(--vurgu-yazi);
@@ -210,13 +233,23 @@ body.tam #panel {
 
 #tutamak {
   flex: 0 0 auto;
+  width: 100%;
   height: 28px;
+  border: 0;
+  padding: 0;
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: grab;
   touch-action: none;
   user-select: none;
+}
+
+#tutamak:focus-visible {
+  outline: 2.5px solid var(--odak);
+  outline-offset: -3px;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
 }
 
 #tutamak:active {
@@ -299,6 +332,12 @@ nav#sekmeler button:active .nav-ikon {
   transform: scale(0.92);
 }
 
+nav#sekmeler button:focus-visible {
+  outline: 2.5px solid var(--odak);
+  outline-offset: -3px;
+  border-radius: 12px;
+}
+
 /* ---------------- Slide-up Bottom Modal Sheet ---------------- */
 .alt-modal {
   position: fixed;
@@ -366,4 +405,17 @@ nav#sekmeler button:active .nav-ikon {
 .alt-modal-kutu::-webkit-scrollbar-thumb {
   background: var(--cizgi);
   border-radius: 999px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #harita,
+  #panel,
+  .alt-modal,
+  .alt-modal-kutu,
+  .harita-ust-sag button,
+  nav#sekmeler button,
+  nav#sekmeler button .nav-ikon {
+    animation: none !important;
+    transition: none !important;
+  }
 }

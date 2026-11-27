@@ -8,6 +8,7 @@ import { iconSvg } from "../ui/icons.js";
 import { t } from "../i18n/index.js";
 import { TrafficEngine } from "../engines/trafficEngine.js";
 import { esc, bas, metre, renkKod, sureEtiket, hataMesaji } from "../map/mapController.js";
+import { accessibleBadgeStyle, bindKeyboardActivators } from "./a11y.js";
 
 export const DEFAULT_HUB = { ad: "Kadıköy", lat: 40.9904, lon: 29.0235, varsayilan: true };
 
@@ -23,9 +24,9 @@ export const HIZLI_SEMTLER = [
 
 export function otobusSatiriHTML(hat, x) {
   const key = `${hat}/${x.bus.kapino}`;
-  const etaText = x.t.dakika <= 1 ? t("eta.arriving") : `~${Math.round(x.t.dakika)} dk`;
+  const etaText = x.t.dakika <= 1 ? t("eta.arriving") : t("eta.min", { n: Math.round(x.t.dakika) });
   return `
-    <div class="kart satir tik" data-odakla="${esc(key)}">
+    <div class="kart satir tik" role="button" tabindex="0" data-odakla="${esc(key)}">
       <div class="kart-sol">
         <div class="bas">
           ${x.t.durakSayisi === 0 ? esc(t("eta.stopNext")) : esc(t("eta.stopsAway", { n: x.t.durakSayisi }))}
@@ -42,8 +43,28 @@ export function otobusSatiriHTML(hat, x) {
 }
 
 export function createNearbyView(S, mc, callbacks) {
+  bindKeyboardActivators();
   let gpsPending = false;
+  let shortcutHandled = false;
   let corridorCache = { data: null, incidents: [], ts: 0 };
+
+  function handleManifestShortcut() {
+    if (shortcutHandled || typeof window === "undefined") return false;
+    shortcutHandled = true;
+    try {
+      const tab = new URLSearchParams(window.location.search).get("tab");
+      if (tab && ["rota", "otobus", "rayli", "vapur"].includes(tab)) {
+        const btn = document.querySelector(`#sekmeler button[data-sekme="${tab}"]`);
+        if (btn) {
+          queueMicrotask(() => btn.click());
+          return true;
+        }
+      }
+    } catch {
+      // ignore URL parsing errors
+    }
+    return false;
+  }
 
   function triggerBackgroundGps() {
     if (gpsPending || S.ben || S.semt) return;
@@ -68,7 +89,7 @@ export function createNearbyView(S, mc, callbacks) {
 
     if (hour >= 6 && hour < 12 && is) {
       items.push(`
-        <div class="kart satir tik" data-akilli-rota="is" style="background:var(--vurgu-yumusak)">
+        <div class="kart satir tik" role="button" tabindex="0" data-akilli-rota="is" style="background:var(--vurgu-yumusak)">
           <div class="kart-sol">
             <div class="bas">${iconSvg("work", 15)} <span>${esc(t("nearby.goToWork"))} · ${esc(is.ad)}</span></div>
             <div class="alt">${esc(t("nearby.smartMorning", { ad: is.ad }))}</div>
@@ -77,7 +98,7 @@ export function createNearbyView(S, mc, callbacks) {
         </div>`);
     } else if (hour >= 16 && hour < 23 && ev) {
       items.push(`
-        <div class="kart satir tik" data-akilli-rota="ev" style="background:var(--vurgu-yumusak)">
+        <div class="kart satir tik" role="button" tabindex="0" data-akilli-rota="ev" style="background:var(--vurgu-yumusak)">
           <div class="kart-sol">
             <div class="bas">${iconSvg("home", 15)} <span>${esc(t("nearby.goToHome"))} · ${esc(ev.ad)}</span></div>
             <div class="alt">${esc(t("nearby.smartEvening", { ad: ev.ad }))}</div>
@@ -91,8 +112,8 @@ export function createNearbyView(S, mc, callbacks) {
         <div class="uyari-banner">
           <span>${iconSvg("alert", 15)} ${esc(t("nearby.heavyTrafficTip", { ti: Math.round(ti) }))}</span>
           <span style="display:flex;gap:6px">
-            <button class="btn kucuk" data-sekme="rayli">${iconSvg("metro", 13)} ${esc(t("nav.rayli"))}</button>
-            <button class="btn kucuk" data-sekme="vapur">${iconSvg("vapur", 13)} ${esc(t("nav.vapur"))}</button>
+            <button type="button" class="btn kucuk" data-sekme="rayli">${iconSvg("metro", 13)} ${esc(t("nav.rayli"))}</button>
+            <button type="button" class="btn kucuk" data-sekme="vapur">${iconSvg("vapur", 13)} ${esc(t("nav.vapur"))}</button>
           </span>
         </div>`);
     }
@@ -113,10 +134,10 @@ export function createNearbyView(S, mc, callbacks) {
         ${favStops
           .map(
             (st, idx) => `
-          <div class="kart satir tik" data-fav-durak="${idx}">
+          <div class="kart satir tik" role="button" tabindex="0" data-fav-durak="${idx}">
             <div class="kart-sol">
-              <div class="bas">${iconSvg("starFill", 14)} <span>${esc(bas(st.ad || "Durak"))}</span></div>
-              <div class="alt">${st.kod ? `Durak ${esc(st.kod)}` : esc(t("modal.stopBoard"))}</div>
+              <div class="bas">${iconSvg("starFill", 14)} <span>${esc(bas(st.ad || t("common.stop")))}</span></div>
+              <div class="alt">${st.kod ? esc(t("common.stopCode", { kod: st.kod })) : esc(t("modal.stopBoard"))}</div>
             </div>
             <div class="kart-sag">${iconSvg("chevronRight", 16)}</div>
           </div>`
@@ -144,7 +165,7 @@ export function createNearbyView(S, mc, callbacks) {
           <div class="saglik-satir">
             <span style="font-weight:600">${esc(c.name || c.ad || "")}</span>
             <span style="display:flex;align-items:center;gap:6px">
-              ${c.speedKmh != null ? `<span class="alt">${Math.round(c.speedKmh)} km/sa</span>` : ""}
+              ${c.speedKmh != null ? `<span class="alt">${Math.round(c.speedKmh)} ${esc(t("unit.kmh"))}</span>` : ""}
               <span class="durum-rozet ${badgeCls(c.level ?? 1)}">${esc(levelLabel(c.level ?? 1))}</span>
             </span>
           </div>`
@@ -167,6 +188,8 @@ export function createNearbyView(S, mc, callbacks) {
   }
 
   async function render(p, ilk, no) {
+    if (handleManifestShortcut()) return null;
+
     if (ilk) {
       callbacks.onYukle(t("nearby.title"), false);
       mc.aktifHatlarAyarla(S.favoriler);
@@ -185,8 +208,8 @@ export function createNearbyView(S, mc, callbacks) {
         ? Promise.resolve(corridorCache)
         : Promise.all([
             typeof TrafficEngine?.analyzeCorridors === "function"
-        ? Promise.resolve().then(() => TrafficEngine.analyzeCorridors()).catch(() => [])
-        : Promise.resolve([]),
+              ? Promise.resolve().then(() => TrafficEngine.analyzeCorridors()).catch(() => [])
+              : Promise.resolve([]),
             typeof TrafficEngine?.fetchIncidents === "function" ? TrafficEngine.fetchIncidents().catch(() => []) : Promise.resolve([]),
           ]).then(([data, incidents]) => {
             corridorCache = { data, incidents, ts: Date.now() };
@@ -244,11 +267,11 @@ export function createNearbyView(S, mc, callbacks) {
     const noktalar = [[refPoint.lat, refPoint.lon]];
 
     // Header & Fleet Radar Quick Toggle
-    const fleetBtn = `<button class="btn kucuk ${S.filoRadar ? "birincil" : ""}" data-filo-toggle>${iconSvg("otobus", 14)} ${esc(S.filoRadar ? t("nearby.fleetOn") : t("nearby.fleetOff"))}${S.filoRadar && mc.getFiloCount() ? ` (${mc.getFiloCount()})` : ""}</button>`;
+    const fleetBtn = `<button type="button" class="btn kucuk ${S.filoRadar ? "birincil" : ""}" data-filo-toggle aria-pressed="${S.filoRadar ? "true" : "false"}">${iconSvg("otobus", 14)} ${esc(S.filoRadar ? t("nearby.fleetOn") : t("nearby.fleetOff"))}${S.filoRadar && mc.getFiloCount() ? ` (${mc.getFiloCount()})` : ""}</button>`;
     let html = callbacks.baslikHTML(esc(t("nearby.title")), false, fleetBtn);
 
     if (S.semt) {
-      html += `<div class="alt" style="margin-bottom:8px">${iconSvg("konum", 14)} <b style="color:var(--yazi)">${esc(S.semt.ad)}</b> ${esc(t("nearby.hubSelected"))} · <button class="btn kucuk" data-semt-temizle>${esc(t("nearby.backToLocation"))}</button></div>`;
+      html += `<div class="alt" style="margin-bottom:8px">${iconSvg("konum", 14)} <b style="color:var(--yazi)">${esc(S.semt.ad)}</b> ${esc(t("nearby.hubSelected"))} · <button type="button" class="btn kucuk" data-semt-temizle>${esc(t("nearby.backToLocation"))}</button></div>`;
     } else if (S.ben) {
       html += `<div class="alt" style="margin-bottom:8px">${esc(t("nearby.locLive", { acc: Math.round(S.ben.acc || 0) }))} <span class="canli">${esc(t("common.live"))}</span></div>`;
     } else if (gpsPending) {
@@ -266,11 +289,11 @@ export function createNearbyView(S, mc, callbacks) {
 
     // Quick Hub Chips
     html += `
-      <div class="hizli-yerler" aria-label="Hızlı Semt Seç">
-        ${HIZLI_SEMTLER.map(
-          (s) =>
-            `<button class="cip ${S.semt?.ad === s.ad || (refPoint.varsayilan && s.ad === refPoint.ad) ? "aktif" : ""}" data-semt="${esc(s.ad)}">${esc(s.ad)}</button>`
-        ).join("")}
+      <div class="hizli-yerler" role="group" aria-label="${esc(t("nearby.quickHubsAria"))}">
+        ${HIZLI_SEMTLER.map((s) => {
+          const aktif = S.semt?.ad === s.ad || (refPoint.varsayilan && s.ad === refPoint.ad);
+          return `<button type="button" class="cip ${aktif ? "aktif" : ""}" data-semt="${esc(s.ad)}" aria-pressed="${aktif ? "true" : "false"}">${esc(s.ad)}</button>`;
+        }).join("")}
       </div>`;
 
     // Smart Commute Suggestion
@@ -303,7 +326,7 @@ export function createNearbyView(S, mc, callbacks) {
       if (m > 1200) continue;
       yakinDuraklar.push({
         tur: "otobus",
-        ad: bas(st.name || st.ad || "Durak"),
+        ad: bas(st.name || st.ad || t("common.stop")),
         kod: st.code || st.kod || "",
         stopId: st.stopId || st.id || "",
         lat,
@@ -387,10 +410,10 @@ export function createNearbyView(S, mc, callbacks) {
         .map((d, idx) => {
           const ikonAd = d.tur === "vapur" ? "vapur" : d.tur === "marmaray" ? "marmaray" : d.tur === "rayli" ? "metro" : "busStop";
           return `
-            <div class="kart satir tik" data-yakin-durak="${idx}">
+            <div class="kart satir tik" role="button" tabindex="0" data-yakin-durak="${idx}">
               <div class="kart-sol">
                 <div class="bas">
-                  <span class="rozet" style="background:${esc(d.renk)}">${iconSvg(ikonAd, 13)} ${esc(d.hat || "Durak")}</span>
+                  <span class="rozet" style="${accessibleBadgeStyle(d.renk)}">${iconSvg(ikonAd, 13)} ${esc(d.hat || t("common.stop"))}</span>
                   <span>${esc(d.ad)}</span>
                 </div>
                 <div class="alt">${esc(d.alt)}</div>
@@ -413,13 +436,15 @@ export function createNearbyView(S, mc, callbacks) {
       for (const hat of favs) {
         const v = S.hatVeri[hat];
         const duyuruVar = duyuruSet.has(hat);
-        const duyuruBadge = duyuruVar ? `<span class="rozet" style="background:var(--uyari)">${iconSvg("alert", 12)}</span>` : "";
+        const duyuruBadge = duyuruVar
+          ? `<span class="rozet" style="${accessibleBadgeStyle("var(--uyari)")}" role="img" title="${esc(t("bus.hasAlert"))}" aria-label="${esc(t("bus.hasAlert"))}">${iconSvg("alert", 12)}</span>`
+          : "";
 
         if (!v?.duraklar || !Object.keys(v.duraklar).length) {
           favHTML += `
-            <div class="kart satir tik" data-hat="${esc(hat)}">
+            <div class="kart satir tik" role="button" tabindex="0" data-hat="${esc(hat)}">
               <div class="kart-sol">
-                <div class="bas"><span class="rozet" style="background:${renkKod(hat)}">${esc(hat)}</span>${duyuruBadge}<span class="alt">${esc(t("nearby.lineFetchErr"))}</span></div>
+                <div class="bas"><span class="rozet" style="${accessibleBadgeStyle(renkKod(hat))}">${esc(hat)}</span>${duyuruBadge}<span class="alt">${esc(t("nearby.lineFetchErr"))}</span></div>
               </div>
               <div class="kart-sag">${iconSvg("chevronRight", 16)}</div>
             </div>`;
@@ -453,9 +478,9 @@ export function createNearbyView(S, mc, callbacks) {
 
           favHTML += `
             <div class="kart">
-              <div class="bas tik" data-hat="${esc(hat)}" style="justify-content:space-between">
+              <div class="bas tik" role="button" tabindex="0" data-hat="${esc(hat)}" style="justify-content:space-between">
                 <span style="display:flex;align-items:center;gap:8px;min-width:0">
-                  <span class="rozet" style="background:${esc(v.renk)}">${esc(hat)}</span>
+                  <span class="rozet" style="${accessibleBadgeStyle(v.renk)}">${esc(hat)}</span>
                   <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">→ ${esc(bas(liste[liste.length - 1].ad))}</span>
                   ${duyuruBadge}
                 </span>
