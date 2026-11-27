@@ -23,9 +23,9 @@
 
 ### Gereksinimler
 
-- **Node.js 20.10+ (20.x) veya 22+**. Aşağıdaki Wrangler komutları için **22.12+** gerekir.
-- **npm**. Windows PowerShell'de `npm`, yürütme ilkesiyle engellenirse `npm.cmd` kullanın (örn. `npm.cmd run build`).
-- Android derlemesi için ek: **JDK 17**, **Android SDK**, (opsiyonel) **Android Studio**. `@capacitor/android` ve `@capacitor/cli` `devDependencies` içindedir; harici `cap` kurulumu gerekmez.
+- **Node.js 22+**. Aşağıdaki Wrangler komutları için **22.12+** gerekir.
+- **npm**. Windows PowerShell'de yürütme ilkesi betikleri engellerse `npm.cmd` ve `npx.cmd` kullanın.
+- Android derlemesi için **JDK 21**, **Android SDK Platform 36** ve **SDK Build-Tools 35.0.0** gerekir. IDE kullanıyorsanız **Android Studio Otter (2025.2.1) veya üstünü** kullanın. `@capacitor/android` ve `@capacitor/cli` `devDependencies` içindedir. Capacitor CLI'ı `npx cap` ile çalıştırabilirsiniz.
 
 ### 1) Bağımlılıkları kur
 
@@ -82,15 +82,16 @@ npm test
 
 ## Capacitor Android build
 
-Proje **Capacitor 6** (`@capacitor/core`, `@capacitor/android`, `@capacitor/cli`, `@capacitor/app`, `@capacitor/geolocation`, `@capacitor/status-bar`). Konfigürasyon `capacitor.config.json`:
+Proje **Capacitor 8** (`@capacitor/core`, `@capacitor/android`, `@capacitor/cli`, `@capacitor/app`, `@capacitor/geolocation`, `@capacitor/status-bar`). Yapılandırma `capacitor.config.json` dosyasındadır.
 
 - `appId`: `com.berk.istanbululasim`
 - `appName`: `İstanbul Ulaşım`
 - `webDir`: `dist`
 - `server.androidScheme`: `https`
+- `SystemBars.initialViewportFitValueHint`: `cover` (HTML'deki `viewport-fit=cover` ile uyumlu)
 - `CapacitorHttp.enabled`: `false` (web fetch + proxy yolu kullanılır)
 
-Native proje **`android/`** dizinindedir (`namespace`/`applicationId` `com.berk.istanbululasim`, `minSdkVersion 22`, `targetSdkVersion 34`, `compileSdkVersion 34`, Gradle; `gradlew`/`gradlew.bat` dahil). Web varlıkları derleme sırasında `dist/`'ten kopyalanır.
+Native proje **`android/`** dizinindedir. Uygulama kimliği `com.berk.istanbululasim`, minimum sürüm **Android 7.0 (API 24)**, derleme ve hedef SDK sürümü **API 36**'dır. Proje **Gradle Wrapper 8.14.3** ve **Android Gradle Plugin 8.13.0** kullanır. `cap sync` web varlıklarını `dist/` dizininden kopyalar.
 
 ### Adımlar
 
@@ -101,7 +102,7 @@ npx cap sync android   # dist/ + plugin'leri android/ içine kopyala
 npx cap open android   # Android Studio'da aç; oradan APK/AAB üret
 ```
 
-Android Studio olmadan CLI ile (JDK 17 + Android SDK; `ANDROID_HOME`/`ANDROID_SDK_ROOT` tanımlı olmalı):
+Komut satırında `JAVA_HOME` değişkenini JDK 21 dizinine, `ANDROID_HOME` değişkenini Android SDK dizinine ayarlayın.
 
 ```sh
 npx cap sync android
@@ -111,7 +112,7 @@ cd android
 ./gradlew assembleRelease    # Windows PowerShell: .\gradlew.bat assembleRelease
 ```
 
-Çıktılar tipik olarak `android/app/build/outputs/apk/debug/app-debug.apk` ve `.../release/`. Konum izni `@capacitor/geolocation` ile istenir; `App.backButton` ve `StatusBar` köprüsü `src/main.js`/`src/core/bridge.js` içindedir. `npm test -- --require-apk` APK'yı `releases/Istanbul-Ulasim-v4.0-Android.apk` yolunda arar.
+Çıktılar `android/app/build/outputs/apk/debug/app-debug.apk` ve `.../release/` altında yer alır. Konum izni `@capacitor/geolocation` ile istenir. `App.backButton` ve `StatusBar` köprüsü `src/main.js`/`src/core/bridge.js` içindedir. Debug APK'yı test etmek için proje köküne dönüp çıktıyı `releases/Istanbul-Ulasim-v4.0-Android.apk` yoluna kopyalayın ve `npm test -- --require-apk` komutunu çalıştırın.
 
 ---
 
@@ -123,7 +124,7 @@ cd android
 ├── docs/
 │   └── ARCHITECTURE.md           # mimari ayrıntılar
 ├── index.html                    # giriş sayfası (Vite kökü)
-├── capacitor.config.json         # Capacitor 6 konfigürasyonu
+├── capacitor.config.json         # Capacitor 8 yapılandırması
 ├── vite.config.js                # Vite 6, /api/proxy dev yönlendirmesi, dist çıktısı
 ├── package.json                  # scriptler ve bağımlılıklar
 │
