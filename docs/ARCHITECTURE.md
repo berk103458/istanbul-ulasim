@@ -87,7 +87,7 @@ Rota motoru ayrı iş parçacığında:
 - **Cloudflare Pages** `wrangler.jsonc` ile `dist/` dosyalarını ve `functions/api/proxy.js` adapter'ını kullanır. `onRequest`, isteği doğrudan `handleProxyHttpRequest` işlevine iletir.
 - **Cloudflare Workers** `wrangler.worker.jsonc` ile `worker.js` dosyasını çalıştırır. `/api/proxy` için aynı `handleProxyHttpRequest` işlevini çağırır. `/health` sürümü raporlar. Statik dosyalar ve SPA fallback'i `ASSETS` bağlaması üzerinden sunulur.
 - **Yerel Node sunucusu** `npm start` komutuyla `server/localServer.js` dosyasını çalıştırır ve `127.0.0.1:4173` adresini dinler. Port `PORT` ile ayarlanabilir. Paylaşılan proxy çekirdeğini, statik dosyaları, SSE/filo, sağlık, metrik ve Google Maps uçlarını geliştirme ve test için sunar.
-- **Capacitor Android:** `capacitor.config.json` + `android/`; `npm run build` → `npx cap sync android` → Android Studio / `gradlew`. Bkz. README.
+- **Capacitor 8 Android** derlemesi `npm run build` → `npx cap sync android` → Android Studio / `gradlew` sırasını izler. Node.js 22+, JDK 21, Android SDK Platform 36 ve SDK Build-Tools 35.0.0 gerekir. Proje Gradle Wrapper 8.14.3 ve Android Gradle Plugin 8.13.0 kullanır. IDE ile derlemek için Android Studio Otter (2025.2.1) veya üstü gerekir.
 - **Scriptable (Faz 5'te kaldırılacak):** `İstanbul Ulaşım.js`, `legacy/İstanbul Ulaşım.v3.8.js`, `scripts/build-scriptable.mjs`, `npm run build:scriptable` → `releases/`; native köprü; `fetchStaticJson` kapalı (`window.__SCRIPTABLE__`).
 
 ---
@@ -143,7 +143,7 @@ server/                      proxyCore.js, cacheLayer.js, apiGateway.js, sseHub.
 server/localServer.js        yerel Node geliştirme ve test sunucusu
 worker.js + wrangler.worker.jsonc   Cloudflare Worker ve statik dosyalar
 wrangler.jsonc               Cloudflare Pages yapılandırması
-android/                     Capacitor native Android (com.berk.istanbululasim; minSdk 22; target/compile 34)
+android/                     Capacitor 8 (com.berk.istanbululasim, minSdk 24, target/compile 36)
 tests/                       verify-all.mjs (npm test), benchmark-and-verify.mjs
 legacy/                      Scriptable v3.8 [Faz 5]
 İstanbul Ulaşım.js           Scriptable v3.8 kök kopya [Faz 5]
@@ -308,7 +308,9 @@ Pages ve Worker aynı TTL, önbellek, circuit breaker ve istek birleştirme kura
 
 Üretim hedefi Cloudflare. Pages ve Workers aynı `/api/proxy` sözleşmesini ve çekirdeği paylaşır. Her iki yapılandırma da `2025-11-01` uyumluluk tarihini ve `nodejs_compat` bayrağını kullanır. Yerel önizleme komutları README'dedir.
 
-Capacitor 6, Android API 22 desteğini korumak için bu fazda tutuldu. Yamalanmış `tar` ana sürümünü zorlamak Android şablon çıkarma adımını bozdu. `npm audit` Capacitor CLI zincirinde beş geliştirme bağımlılığı bulgusu raporlar.
+### Faz 4
+
+Capacitor ve resmi eklentiler 8.x'e yükseltildi. Android 7.0 (API 24) ve üzeri desteklenir. Android sistem çubukları için `SystemBars.initialViewportFitValueHint` değeri, web uygulamasının `viewport-fit=cover` ayarını başlangıçta bildirir.
 
 ### Faz 5
 
