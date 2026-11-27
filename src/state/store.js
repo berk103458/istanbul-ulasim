@@ -10,7 +10,14 @@ export function createStore(initial = {}) {
     get: () => state,
     set(patch) {
       Object.assign(state, patch);
-      for (const listener of listeners) listener(state);
+      for (const listener of [...listeners]) {
+        if (!listeners.has(listener)) continue;
+        try {
+          listener(state);
+        } catch {
+          // Isolate subscriber errors so remaining listeners still run.
+        }
+      }
     },
     subscribe(listener) {
       listeners.add(listener);
