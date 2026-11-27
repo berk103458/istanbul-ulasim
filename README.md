@@ -63,10 +63,10 @@ npm start         # yerel Node sunucusu — statik dosyalar ve API (127.0.0.1:41
 npm test
 ```
 
-`npm test` önce `npm run build`, ardından `node tests/verify-all.mjs` çalıştırır. Birim testlerini (Zaman, geo `Core`, Marmaray, rota motoru `Plan`), yerel sunucu ve proxy kontrollerini (`/health` ve SSRF allowlist 403 dahil) ve sürüm artefaktı kontrollerini kapsar. İETT `GetDuyurular_json`, Şehir Hatları ve İSPARK için varsayılan test sabit yerel yanıtlar kullanır ve internet bağlantısı gerektirmez.
+`npm test` önce `npm run build`, ardından `node tests/verify-all.mjs` çalıştırır. Birim testlerini (Zaman, geo `Core`, Marmaray, rota motoru `Plan`), yerel sunucu ve proxy kontrollerini (`/health` ve SSRF allowlist 403 dahil) ve Android APK kontrolünü kapsar. İETT `GetDuyurular_json`, Şehir Hatları ve İSPARK için varsayılan test sabit yerel yanıtlar kullanır ve internet bağlantısı gerektirmez.
 
 - `npm test -- --live` İETT, Şehir Hatları ve İSPARK kontrollerini canlı servislerle çalıştırır ve internet bağlantısı gerektirir.
-- `npm test -- --require-apk` Android APK dosyasının bulunmasını zorunlu kılar. Varsayılan test APK'yı varsa doğrular, dosya yoksa ilgili kontrolü atlar. Depodaki `releases/Istanbul-Ulasim-v4.0-iOS-Scriptable.js` dosyası her çalıştırmada doğrulanır. Artefakt adlarındaki `v4.0` tarihsel dosya adının parçasıdır.
+- `npm test -- --require-apk` Android APK dosyasının bulunmasını zorunlu kılar. Varsayılan test APK'yı varsa doğrular, dosya yoksa ilgili kontrolü atlar. APK adındaki `v4.0` tarihsel dosya adının parçasıdır.
 
 `node tests/benchmark-and-verify.mjs` ayrı performans ve ek kontrol betiğidir.
 
@@ -76,7 +76,6 @@ npm test
 | --- | --- | --- |
 | `npm run icons` | `icons` | `sharp` ile `assets-src/icon-master.png`'den PWA/Android ikonlarını `public/icons/`'a üretir. |
 | `node scripts/build-static-data.mjs` | — (npm script yok) | İETT/Vapur/İSPARK verisini çekip `public/data/*.json` statik fallback dosyalarını yeniden üretir (canlı ağ gerekir). |
-| `npm run build:scriptable` | `build:scriptable` | Önce `npm run build`; `dist/` çıktısını tek dosya Scriptable paketine dönüştürür → `releases/`. **Faz 5'te kaldırılacak.** |
 
 ---
 
@@ -131,7 +130,7 @@ cd android
 │   ├── main.js                   # önyükleme, yönlendirme (S.yigin), olaylar, periyodik canlı döngüler, PWA
 │   ├── core/                     # platformdan bağımsız çekirdek
 │   │   ├── api.js                # API sağlayıcıları: iett, metro, marmaray, vapur, trafik, iskeleler, ispark, transitous, ag; MARMARAY_STATIONS
-│   │   ├── bridge.js             # Bridge: runtime tespiti (web/capacitor/scriptable/node), http, proxy URL, konum
+│   │   ├── bridge.js             # Bridge: runtime tespiti (web/capacitor/node), http, proxy URL, konum
 │   │   ├── geo.js                # Core: mesafe, yön, geometri (haritadan bağımsız)
 │   │   ├── router.js             # Plan: rota planlayıcı v5 (çok bacaklı A*, aktarma, ETA)
 │   │   ├── storage.js            # KV: IndexedDB + localStorage fallback kalıcı depolama
@@ -170,8 +169,7 @@ cd android
 │
 ├── scripts/                      # Node ESM yardımcı betikleri
 │   ├── build-static-data.mjs     # canlı kaynaklardan public/data/*.json üretir (npm script yok)
-│   ├── generate-icons.mjs        # npm run icons
-│   └── build-scriptable.mjs      # npm run build:scriptable (Faz 5'te kaldırılacak)
+│   └── generate-icons.mjs        # npm run icons
 │
 ├── functions/
 │   └── api/proxy.js              # Cloudflare Pages Function adapter'ı
@@ -187,9 +185,6 @@ cd android
 ├── wrangler.jsonc               # Cloudflare Pages yapılandırması
 │
 ├── android/                      # Capacitor native Android projesi
-├── İstanbul Ulaşım.js            # Scriptable v3.8 tek dosya uygulaması (Faz 5'te kaldırılacak)
-├── legacy/İstanbul Ulaşım.v3.8.js# Scriptable legacy kopya (Faz 5'te kaldırılacak)
-├── releases/                     # Scriptable/APK sürüm artefaktları
 ├── assets-src/                   # ikon kaynağı (icon-master.png)
 ├── tests/                        # verify-all.mjs + benchmark-and-verify.mjs
 └── ...                            # package-lock.json, .gitignore
@@ -215,7 +210,6 @@ Canlı kaynak başarısız olursa `src/core/api.js` `fetchStaticJson()` ile `./d
 1. **Arayüz** (`src/views`, `src/map`) `src/core/api.js` (`API.*`) çağırır.
 2. `api.js`, `src/core/bridge.js` `Bridge.http()` ile istek yapar. `API` kendi katmanlı önbelleğini (bellek + `KV` IndexedDB, `cached()`) kullanır; `DataProvider` ek SWR + in-flight coalescing + sağlayıcı sağlığı ekler.
 3. **Proxy kararı** (`Bridge.http`):
-   - **Scriptable** (`window.__SCRIPTABLE__`): native köprü — Faz 5'te kaldırılacak.
    - **Capacitor**: `CapacitorHttp` denenir; hata olursa `customProxyBase + /api/proxy`.
    - **Web/PWA**: bazı host'lara doğrudan (`isDirectCorsHost`: `api.ibb.gov.tr/MetroIstanbul`, `tkmservices.ibb.gov.tr`, `api.transitous.org`); aksi halde `customProxyBase ? <base>/api/proxy : ./api/proxy`. `404/405` → `proxyMissing` → "Static hosting (proxy yok)" ve statik fallback. `customProxyBase` kullanıcı ayarı `ulasim.proxyUrl` / `KV proxyUrl`.
    - **Node**: doğrudan `fetch`.
@@ -244,10 +238,10 @@ SSE, filo, metrikler ve Google Maps uçları `npm start` ile açılan yerel Node
 
 ## Planlanan değişiklikler
 
-- **Faz 5:** Scriptable kaynakları, derleme komutu, yerel köprü ve artefakt testleri kaldırılacak.
+- Statik yedek verileri elle yenilemek için `npm run data` komutunun eklenmesi öneriliyor. Mevcut komut `node scripts/build-static-data.mjs`.
 
 ---
 
 ## Doğrulama
 
-README'deki `npm` komutlarının `package.json` `scripts`'leriyle eşleştiği kontrol edilebilir (bkz. `package.json`: `dev`, `build`, `preview`, `start`, `icons`, `build:scriptable`, `test`).
+README'deki `npm` komutlarının `package.json` `scripts`'leriyle eşleştiği kontrol edilebilir (bkz. `package.json`: `dev`, `build`, `preview`, `start`, `icons`, `test`).

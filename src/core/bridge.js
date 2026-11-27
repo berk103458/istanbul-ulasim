@@ -1,26 +1,4 @@
-// ---- Birleşik Platform Köprüsü: Capacitor Android / Web Proxy / iOS Scriptable ----
-let seq = 0;
-const pending = new Map();
-let queue = [];
-
-if (typeof window !== "undefined") {
-  window.__bridgeTake = () => JSON.stringify(queue.splice(0));
-  window.__bridgeDeliver = (items) => {
-    for (const it of items) {
-      const p = pending.get(it.id);
-      if (!p) continue;
-      pending.delete(it.id);
-      it.ok ? p.res(it.data) : p.rej(new Error(it.data));
-    }
-  };
-  window.__bridgeCall = (kind, args = {}) =>
-    new Promise((res, rej) => {
-      const id = ++seq;
-      pending.set(id, { res, rej });
-      queue.push({ id, kind, args });
-    });
-}
-
+// ---- Birleşik Platform Köprüsü: Capacitor Android / Web Proxy / Node ----
 let customProxyBase = "";
 let proxyMissing = false;
 try {
@@ -53,7 +31,6 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 25000) {
 export const Bridge = {
   get runtime() {
     if (typeof window === "undefined") return "node";
-    if (window.__SCRIPTABLE__) return "scriptable";
     if (window.Capacitor?.isNativePlatform?.()) return "capacitor";
     return "web";
   },
@@ -69,10 +46,6 @@ export const Bridge = {
 
   async http({ url, method = "GET", headers = {}, body = null }) {
     const rt = Bridge.runtime;
-
-    if (rt === "scriptable") {
-      return window.__bridgeCall("http", { url, method, headers, body });
-    }
 
     if (rt === "capacitor") {
       const capHttp = window.Capacitor?.Plugins?.CapacitorHttp;
@@ -142,9 +115,6 @@ export const Bridge = {
 
   async location() {
     const rt = Bridge.runtime;
-    if (rt === "scriptable") {
-      return window.__bridgeCall("location");
-    }
     if (rt === "capacitor") {
       try {
         const { Geolocation } = await import("@capacitor/geolocation");
@@ -168,9 +138,6 @@ export const Bridge = {
   },
 
   async openUrl(url) {
-    if (Bridge.runtime === "scriptable") {
-      return window.__bridgeCall("open", { url });
-    }
     window.open(url, "_blank", "noopener");
     return true;
   },

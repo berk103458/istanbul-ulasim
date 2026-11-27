@@ -117,11 +117,7 @@ async function verifyServer() {
   }
 }
 
-function verifyReleaseArtifacts() {
-  const scriptablePath = path.join(root, "releases", "Istanbul-Ulasim-v4.0-iOS-Scriptable.js");
-  assert.ok(fs.existsSync(scriptablePath), "Scriptable bundle must exist");
-  execFileSync(process.execPath, ["--check", scriptablePath], { stdio: "inherit", timeout: 10000 });
-
+function verifyAndroidApk() {
   const apkName = "Istanbul-Ulasim-v4.0-Android.apk";
   const apkPath = path.join(root, "releases", apkName);
   if (!fs.existsSync(apkPath)) {
@@ -171,8 +167,8 @@ async function runTests() {
   await verifyServer();
   if (!live) console.log("   Live checks for İETT, Şehir Hatları and İSPARK: npm test -- --live");
 
-  console.log("3. Release artifacts verification...");
-  verifyReleaseArtifacts();
+  console.log("3. Android APK verification...");
+  verifyAndroidApk();
 
   console.log("4. Proxy contract tests...");
   execFileSync(process.execPath, ["--test", "tests/proxy.test.mjs"], {

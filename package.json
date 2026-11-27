@@ -10,7 +10,6 @@
     "preview": "vite preview",
     "start": "node server/localServer.js",
     "icons": "node scripts/generate-icons.mjs",
-    "build:scriptable": "node scripts/build-scriptable.mjs",
     "pretest": "npm run build",
     "test": "node tests/verify-all.mjs"
   },

@@ -116,7 +116,7 @@ export const DataProvider = (() => {
    */
   async function hasBackendProxy() {
     if (proxyAvailable !== null) return proxyAvailable;
-    if (Bridge.runtime === "scriptable" || typeof fetch !== "function") {
+    if (typeof fetch !== "function") {
       proxyAvailable = false;
       return false;
     }
