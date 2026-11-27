@@ -7,8 +7,18 @@ import { API } from "../core/api.js";
 import { iconSvg } from "../ui/icons.js";
 import { t } from "../i18n/index.js";
 import { EtaEngine } from "../engines/etaEngine.js";
+import { TrafficEngine } from "../engines/trafficEngine.js";
 import { NotificationEngine } from "../engines/notificationEngine.js";
 import { esc, bas, metre, saat, renkKod, metrobusMu } from "../map/mapController.js";
+import {
+  describeEtaTrust,
+  parseGpsAgeSec,
+  parseGpsTimestampMs,
+  FRESH_GPS_SEC,
+  renderTrustBadgesHTML,
+  renderGpsAgeHTML,
+  summarizeVehiclesFreshness,
+} from "../ui/etaIndicators.js";
 import { otobusSatiriHTML } from "./nearbyView.js";
 import { accessibleBadgeStyle, bindKeyboardActivators } from "./a11y.js";
 
@@ -18,11 +28,23 @@ function dayLabel(code) {
   return t("bus.dayWeekday");
 }
 
-function formatHms(ms) {
-  const d = new Date(ms);
-  const p2 = (n) => String(n).padStart(2, "0");
-  return `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`;
+export function buildBusEtaContext(hatVeri, arac, incidents = []) {
+  return {
+    hatBilgi: hatVeri?.bilgi,
+    fleetItem: arac?.b || undefined,
+    observedSpeedKmH: Number.isFinite(arac?.hiz) ? arac.hiz : undefined,
+    trafficEngine: typeof TrafficEngine?.getCorridorSpeed === "function" ? TrafficEngine : undefined,
+    incidents: Array.isArray(incidents) ? incidents : [],
+  };
 }
+
+const gpsClock = new Intl.DateTimeFormat("tr-TR", {
+  timeZone: "Europe/Istanbul",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+});
 
 function isWatched(hat, durakKod) {
   const list = typeof NotificationEngine?.getWatches === "function" ? NotificationEngine.getWatches() : [];
@@ -162,6 +184,20 @@ export function createBusView(S, mc, callbacks) {
       favBtn
     );
 
+    const lineFresh = summarizeVehiclesFreshness(v.otobusler);
+    const lineAgeHTML = renderGpsAgeHTML({
+      sonGuncellemeSn: lineFresh.freshestSec,
+      gpsTier: lineFresh.state === "stale" ? "stale" : lineFresh.freshestSec <= FRESH_GPS_SEC ? "fresh" : "aging",
+    }, { liveMs: lineFresh.freshestMs });
+    const lineStatusHTML =
+      lineFresh.state === "live"
+        ? `<span class="canli">${esc(t("common.live"))}</span> ${lineAgeHTML}`
+        : lineFresh.state === "stale"
+        ? `<span class="durum-rozet eski">${esc(t("eta.status.STALE"))}</span> ${lineAgeHTML}`
+        : lineFresh.state === "missing"
+        ? `<span class="durum-rozet soluk">${esc(t("eta.gpsUnknown"))}</span>`
+        : `<span class="durum-rozet soluk">${esc(t("eta.noLiveVehicle"))}</span>`;
+
     html += `<div class="alt" style="margin-bottom:8px">${[
       b.km ? b.km.toFixed(1) + " km" : "",
       b.dk ? t("bus.tripDuration", { n: Math.round(b.dk) }) : "",
@@ -170,7 +206,7 @@ export function createBusView(S, mc, callbacks) {
     ]
       .filter(Boolean)
       .map(esc)
-      .join(" · ")} <span class="canli">${esc(t("common.live"))}</span></div>`;
+      .join(" · ")} ${lineStatusHTML}</div>`;
 
     // Announcements banner
     for (const d of hatDuyurular || []) {
@@ -225,13 +261,19 @@ export function createBusView(S, mc, callbacks) {
     html += `<div class="kart" style="margin-bottom:12px">`;
     if (saatler.length) {
       if (sonraki) {
-        html += `<div class="alt">${esc(t("bus.nextDep"))} <b style="color:var(--yazi)">${esc(sonraki)}</b> · ${Zaman.kalanYazi(Zaman.kalan(sonraki))} ${esc(t("bus.later"))}</div>`;
+        const remaining = Zaman.dk(sonraki) - simdi;
+        const countdown = remaining === 0
+          ? t("common.now")
+          : remaining < 60
+          ? t("bus.departureIn", { n: remaining })
+          : t("bus.departureInHours", { h: Math.floor(remaining / 60), m: remaining % 60 });
+        html += `<div class="alt"><span class="durum-rozet tarife">${esc(t("eta.sourceSchedule"))}</span> ${esc(t("bus.nextDep"))} <b style="color:var(--yazi)">${esc(sonraki)}</b> · ${esc(countdown)}</div>`;
       }
       html += `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">${saatler
         .map((s) => {
           const gecti = bugun && Zaman.dk(s) < simdi;
           const isNext = s === sonraki;
-          return `<span class="sure ${isNext ? "" : "tarife"}" style="${gecti ? "opacity:.45" : ""}">${esc(s)}</span>`;
+          return `<span class="sure tarife" style="${gecti ? "background:transparent" : isNext ? "color:var(--yazi);border:1px solid var(--cizgi)" : ""}">${esc(s)}</span>`;
         })
         .join("")}</div>`;
     } else {
@@ -243,24 +285,42 @@ export function createBusView(S, mc, callbacks) {
     const durakta = {};
     const arada = {};
     const hiz0 = v.hiz || 15;
+    const lineIncidents = mc.getTrafikIncidents?.() || [];
     for (const a of S.arac.values()) {
       if (a.hat !== hat || a.yon !== p.yon) continue;
       const yer = mc.aracYeri(liste, a);
       if (!yer) continue;
-      const tEst = h && h.i >= yer.sonraki ? Core.varisTahmini(liste, a.gor, h.i, mc.aracHizi(hat, a.kapino) || hiz0) : null;
-      const kayit = { a, yer, t: tEst };
+      let eta = null;
+      if (h && h.i >= yer.sonraki) {
+        if (typeof EtaEngine?.predict === "function") {
+          eta = EtaEngine.predict(
+            liste,
+            { ...(a.b || {}), lat: a.gor.lat, lon: a.gor.lon },
+            h.i,
+            buildBusEtaContext(v, a, lineIncidents)
+          );
+        } else {
+          eta = Core.varisTahmini(liste, a.gor, h.i, mc.aracHizi(hat, a.kapino) || hiz0);
+        }
+      }
+      const trust = describeEtaTrust(eta, { fallbackAgeSec: parseGpsAgeSec(a.b?.zaman) });
+      const kayit = { a, yer, t: eta, trust };
       if (yer.durakta != null) (durakta[yer.durakta] ||= []).push(kayit);
       else (arada[yer.sonraki] ||= []).push(kayit);
     }
 
-    const kalanYazi = (k) =>
-      k.t ? ` · <b>${esc(k.t.dakika <= 1 ? t("eta.arriving") : t("eta.min", { n: k.t.dakika }))}</b>` : "";
+    const kalanYazi = (k) => {
+      if (!k.t) return "";
+      const suffix = k.trust?.isStale ? ` (${esc(t("eta.status.STALE"))})` : "";
+      return ` · <b>${esc(k.trust.pillText)}</b>${suffix}`;
+    };
     let lis = "";
     liste.forEach((d, i) => {
       for (const k of (arada[i] || []).sort((x, y) => y.yer.oran - x.yer.oran)) {
+        const staleCls = k.trust?.isStale ? " eski" : "";
         lis += `
           <li class="tik" role="button" tabindex="0" data-arac="${esc(k.a.kapino)}" style="padding-left:8px">
-            <span class="arac-cip" style="${accessibleBadgeStyle(v.renk)}">${iconSvg(v.mb ? "mb" : "otobus", 12)} ${esc(k.a.kapino)}</span>
+            <span class="arac-cip${staleCls}" style="${accessibleBadgeStyle(v.renk)}">${iconSvg(v.mb ? "mb" : "otobus", 12)} ${esc(k.a.kapino)}</span>
             <span class="alt">${esc(t("bus.toStopDist", { ad: bas(d.ad), m: metre(k.yer.metre) }))}${kalanYazi(k)}</span>
           </li>`;
       }
@@ -269,7 +329,7 @@ export function createBusView(S, mc, callbacks) {
         <li data-durak="${i}" role="button" tabindex="0" class="tik ${h && h.i === i ? "aktif" : ""}">
           <span>${esc(bas(d.ad))}</span>
           <span style="display:flex;align-items:center;gap:6px">
-            ${bu.map((k) => `<button type="button" class="arac-cip" data-arac="${esc(k.a.kapino)}" style="border:0;cursor:pointer;${accessibleBadgeStyle(v.renk)}">${iconSvg(v.mb ? "mb" : "otobus", 12)} ${esc(k.a.kapino)}</button>`).join("")}
+            ${bu.map((k) => `<button type="button" class="arac-cip${k.trust?.isStale ? " eski" : ""}" data-arac="${esc(k.a.kapino)}" style="border:0;cursor:pointer;${accessibleBadgeStyle(v.renk)}">${iconSvg(v.mb ? "mb" : "otobus", 12)} ${esc(k.a.kapino)}</button>`).join("")}
           </span>
         </li>`;
     });
@@ -332,39 +392,52 @@ export function createBusView(S, mc, callbacks) {
     const hiz = mc.aracHizi(p.hat, a.kapino);
     const ti = mc.getTrafikIndeks?.()?.TI ?? null;
     const incidents = mc.getTrafikIncidents?.() || [];
+    const etaCtx = buildBusEtaContext(v, a, incidents);
     const tah = (i) => {
       if (!liste.length || s < 0 || i < s) return null;
       if (typeof EtaEngine?.predict === "function") {
-        const res = EtaEngine.predict(liste, { ...a.b, lat: a.gor.lat, lon: a.gor.lon }, i, {
-          hat: p.hat,
-          yon: a.yon,
-          arac: a,
-          hatBilgi: v.bilgi,
-          hizKmSa: hiz,
-          trafficIndex: ti,
-          incidents,
-        });
-        if (res) return res;
+        return EtaEngine.predict(liste, { ...(a.b || {}), lat: a.gor.lat, lon: a.gor.lon }, i, etaCtx);
       }
       return Core.varisTahmini(liste, a.gor, i, hiz);
     };
 
-    const yas = Math.max(0, Math.round((Date.now() - a.gercek.ms) / 1000));
-    const yasStr = yas < 90 ? t("eta.secAgo", { n: yas }) : t("eta.minAgo", { n: Math.round(yas / 60) });
-    const hms = formatHms(a.gercek.ms);
+    const hd = mc.hedefDurak(p.hat, a.yon);
+    const tEta = hd && s >= 0 ? tah(hd.i) : null;
+    const refEta = tEta || (liste.length && s >= 0 ? tah(Math.min(liste.length - 1, s)) : null);
+    const validMs = parseGpsTimestampMs(a.b?.zaman);
+    const fallbackAgeSec = refEta?.sonGuncellemeSn != null ? refEta.sonGuncellemeSn : parseGpsAgeSec(a.b?.zaman);
+    const refTrust = describeEtaTrust(refEta, { fallbackAgeSec });
+    const etaTrust = tEta ? describeEtaTrust(tEta, { fallbackAgeSec }) : null;
 
     const badges = [];
-    if (a.b?.sapma || a.b?.deviation) badges.push(`<span class="durum-rozet uyari">${esc(t("eta.deviation"))}</span>`);
-    if (a.b?.gecikme || a.b?.delayed) badges.push(`<span class="durum-rozet uyari">${esc(t("eta.delayed"))}</span>`);
-    if (a.b?.hizmetDisi || a.b?.outOfService) badges.push(`<span class="durum-rozet hata">${esc(t("eta.outOfService"))}</span>`);
+    const trustBadges = renderTrustBadgesHTML(refTrust, { compact: false, showOnTime: true });
+    if (trustBadges) badges.push(trustBadges);
+    if ((a.b?.sapma || a.b?.deviation) && refTrust.durumKod !== "OFF_ROUTE") {
+      badges.push(`<span class="durum-rozet uyari">${esc(t("eta.deviation"))}</span>`);
+    }
+    if ((a.b?.gecikme || a.b?.delayed) && refTrust.durumKod !== "DELAYED") {
+      badges.push(`<span class="durum-rozet uyari">${esc(t("eta.delayed"))}</span>`);
+    }
+    if (a.b?.hizmetDisi || a.b?.outOfService) {
+      badges.push(`<span class="durum-rozet hata">${esc(t("eta.outOfService"))}</span>`);
+    }
 
-    const plaka = a.b?.plaka || a.b?.plate || "";
-    const operator = a.b?.operator || v.bilgi?.operator || "";
+    const plaka = refEta?.plaka || a.b?.plaka || a.b?.plate || "";
+    const operator = refEta?.operator || a.b?.operator || v.bilgi?.operator || "";
+    const gpsAgeSpan = renderGpsAgeHTML(refTrust, { prefix: false, liveMs: validMs });
+    const lastUpdateDetail =
+      refTrust.sonGuncellemeSn != null && validMs != null
+        ? `<b style="color:var(--yazi)">${esc(gpsClock.format(validMs))}</b> · ${gpsAgeSpan}`
+        : gpsAgeSpan;
 
     let kart = `<div class="kart">`;
-    if (liste.length) kart += `<div class="bas" style="justify-content:space-between"><span>→ ${esc(bas(liste[liste.length - 1].ad))}</span><span style="display:flex;gap:4px">${badges.join("")}</span></div>`;
+    if (liste.length) {
+      kart += `<div class="bas" style="justify-content:space-between"><span>→ ${esc(bas(liste[liste.length - 1].ad))}</span><span style="display:flex;gap:4px;flex-wrap:wrap">${badges.join("")}</span></div>`;
+    } else if (badges.length) {
+      kart += `<div class="eta-guven-serit">${badges.join("")}</div>`;
+    }
     if (v.bilgi?.ad) kart += `<div class="alt">${esc(bas(v.bilgi.ad))}</div>`;
-    kart += `<div class="alt">${esc(t("eta.lastUpdate"))}: <b style="color:var(--yazi)">${esc(hms)}</b> · <span data-live-age="${a.gercek.ms}">${esc(yasStr)}</span>${a.hiz != null ? ` · ~${Math.round(a.hiz)} ${esc(t("unit.kmh"))}` : ""}</div>`;
+    kart += `<div class="alt">${esc(t("eta.lastUpdate"))}: ${lastUpdateDetail}${a.hiz != null ? ` · ~${Math.round(a.hiz)} ${esc(t("unit.kmh"))}` : ""}</div>`;
     if (plaka || operator) {
       kart += `<div class="alt">${plaka ? `${esc(t("eta.plate"))}: <b style="color:var(--yazi)">${esc(plaka)}</b>` : ""}${plaka && operator ? " · " : ""}${operator ? `${esc(t("eta.operator"))}: <b style="color:var(--yazi)">${esc(operator)}</b>` : ""}</div>`;
     }
@@ -381,29 +454,58 @@ export function createBusView(S, mc, callbacks) {
       }</div></div>`;
     }
 
-    const hd = mc.hedefDurak(p.hat, a.yon);
     if (hd && s >= 0) {
-      const tEta = tah(hd.i);
       const watched = isWatched(p.hat, hd.d.kod);
-      const factors = tEta?.factors || {};
-      const speedVal = factors.speedKmh ?? Math.round(hiz);
-      const trafficFactor = factors.trafficMultiplier != null ? `×${Number(factors.trafficMultiplier).toFixed(2)}` : ti != null ? `%${Math.round(ti)}` : "–";
-      const dwellMin = factors.dwellMin != null ? `${Number(factors.dwellMin).toFixed(1)} ${t("unit.minShort")}` : "–";
-      const hasIncident = Boolean(tEta?.incidentWarning || factors.incidentPenaltyMin > 0);
+      const minUnit = t("unit.minShort");
+      const speedVal = Number.isFinite(tEta?.hizKmSa) ? `${Math.round(tEta.hizKmSa)} ${t("unit.kmh")}` : "–";
+      const trafficFactor =
+        Number.isFinite(tEta?.trafikEtkisiDk) && tEta.trafikEtkisiDk > 0
+          ? `+${Number(tEta.trafikEtkisiDk).toFixed(1)} ${minUnit}`
+          : ti != null
+          ? `%${Math.round(ti)}`
+          : "–";
+      const dwellMin = Number.isFinite(tEta?.duraklamaDk)
+        ? `${Number(tEta.duraklamaDk).toFixed(1)} ${minUnit}`
+        : "–";
+      const delayBadge =
+        Number.isFinite(tEta?.gecikmeDk) && tEta.gecikmeDk >= 1
+          ? `<span class="durum-rozet uyari">${esc(t("eta.delayAmount", { n: Number(tEta.gecikmeDk).toFixed(1) }))}</span>`
+          : "";
+      const hasIncident = Number.isFinite(tEta?.kazaEtkisiDk) && tEta.kazaEtkisiDk > 0;
+      const cardVariant = etaTrust ? etaTrust.cardClass : "eksik-kart";
+      const etaHeadlineColor =
+        etaTrust?.isStale
+          ? "var(--uyari)"
+          : etaTrust?.isOffRoute
+          ? "var(--hata)"
+          : etaTrust?.isMissing
+          ? "var(--soluk)"
+          : "var(--vurgu)";
+      const clockText =
+        tEta && Number.isFinite(tEta.dakika)
+          ? `${etaTrust?.isLive && !etaTrust?.isMissing ? "" : "~"}${saat(simdi + tEta.dakika)}`
+          : "";
+      const liveEtaAttr = etaTrust?.canSurgicalUpdate ? ` data-live-eta="${esc(key)}"` : "";
 
-      kart += `<div class="kart" style="background:var(--vurgu-yumusak)">
+      kart += `<div class="kart eta-detay-kart ${cardVariant}">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
           <div class="alt">${esc(hd.secili ? t("nearby.myStop") : t("nearby.nearestStop"))} (${esc(bas(hd.d.ad))})</div>
           <button type="button" class="btn kucuk ${watched ? "birincil" : ""}" data-bildir-hat="${esc(p.hat)}" data-bildir-durak="${esc(hd.d.kod)}" data-bildir-ad="${esc(bas(hd.d.ad))}" data-bildir-yon="${esc(a.yon)}" aria-pressed="${watched ? "true" : "false"}">🔔 ${esc(watched ? t("eta.notifying") : t("eta.notify3m"))}</button>
         </div>
         ${
-          tEta
-            ? `<div class="bas" style="color:var(--vurgu);font-size:20px" data-live-eta="${esc(key)}">${esc(tEta.dakika <= 1 ? t("eta.arriving") : t("eta.min", { n: tEta.dakika }))} <span class="alt">${esc(t("eta.stopsAway", { n: tEta.durakSayisi }))} · ${metre(tEta.metre)} · ${saat(simdi + tEta.dakika)}</span></div>
+          tEta && etaTrust
+            ? `<div class="bas" style="color:${etaHeadlineColor};font-size:20px"${liveEtaAttr}>${esc(etaTrust.pillText)} <span class="alt">${esc(t("eta.stopsAway", { n: tEta.durakSayisi }))} · ${metre(tEta.metre)}${clockText ? ` · ${esc(clockText)}` : ""}</span></div>
+               <div class="eta-guven-serit">
+                 ${renderTrustBadgesHTML(etaTrust, { compact: false, showOnTime: true })}
+                 ${renderGpsAgeHTML(etaTrust, { prefix: true, liveMs: validMs })}
+                 ${delayBadge}
+               </div>
+               ${etaTrust.notice ? `<div class="eta-not">${iconSvg("alert", 14)} <span>${esc(etaTrust.notice)}</span></div>` : ""}
                <div class="alt" style="margin-top:4px;gap:8px;flex-wrap:wrap">
-                 <span>${esc(t("eta.speed"))}: <b>${esc(speedVal)} ${esc(t("unit.kmh"))}</b></span>
+                 <span>${esc(t("eta.speed"))}: <b>${esc(speedVal)}</b></span>
                  <span>· ${esc(t("eta.trafficImpact"))}: <b>${esc(trafficFactor)}</b></span>
                  <span>· ${esc(t("eta.stopDwell"))}: <b>${esc(dwellMin)}</b></span>
-                 ${hasIncident ? `<span class="durum-rozet uyari">${iconSvg("alert", 12)} ${esc(t("eta.incidentWarn"))}</span>` : ""}
+                 ${hasIncident ? `<span class="durum-rozet uyari">${iconSvg("alert", 12)} ${esc(t("eta.incidentWarn"))} (+${Math.round(tEta.kazaEtkisiDk)} ${esc(minUnit)})</span>` : ""}
                </div>`
             : `<div class="alt">${esc(t("bus.passedStop"))}</div>`
         }
@@ -412,11 +514,12 @@ export function createBusView(S, mc, callbacks) {
 
     if (s >= 0) {
       const son = liste.length - 1;
+      const approxPrefix = refTrust.isLive && !refTrust.isMissing ? "" : "~";
       const satirlar = [];
       for (let i = s; i <= son && satirlar.length < 5; i++) {
-        const tNext = tah(i);
-        if (tNext) {
-          satirlar.push(`<div class="alt" style="justify-content:space-between;width:100%"><span>${esc(bas(liste[i].ad))}</span><b style="color:var(--yazi)">${saat(simdi + tNext.dakika)}</b></div>`);
+        const tItem = tah(i);
+        if (tItem && Number.isFinite(tItem.dakika)) {
+          satirlar.push(`<div class="alt" style="justify-content:space-between;width:100%"><span>${esc(bas(liste[i].ad))}</span><b style="color:${approxPrefix ? "var(--soluk)" : "var(--yazi)"}">${approxPrefix}${saat(simdi + tItem.dakika)}</b></div>`);
         }
       }
       const yuzde = Math.round((s / Math.max(1, son)) * 100);

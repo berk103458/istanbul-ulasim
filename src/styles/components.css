@@ -935,6 +935,121 @@ table.tarife tr.siradaki td {
   color: var(--soluk);
 }
 
+.durum-rozet.bilgi {
+  background: var(--vurgu-yumusak);
+  color: var(--vurgu);
+}
+
+.durum-rozet.eski {
+  background: var(--uyari-yumusak);
+  color: var(--uyari);
+  border: 1px dashed color-mix(in srgb, var(--uyari) 55%, transparent);
+}
+
+.durum-rozet.tarife {
+  background: var(--kart-2);
+  color: var(--soluk);
+  border: 1px solid var(--cizgi);
+}
+
+.sure.eski {
+  background: var(--uyari-yumusak);
+  color: var(--uyari);
+  border: 1px dashed color-mix(in srgb, var(--uyari) 55%, transparent);
+  font-weight: 600;
+}
+
+.sure.eksik {
+  background: var(--kart-2);
+  color: var(--soluk);
+  border: 1px dashed var(--cizgi);
+  font-weight: 600;
+}
+
+.gps-yas {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-variant-numeric: tabular-nums;
+}
+
+.gps-yas.taze {
+  color: var(--iyi);
+  font-weight: 600;
+}
+
+.gps-yas.orta {
+  color: var(--soluk);
+}
+
+.gps-yas.eski {
+  color: var(--uyari);
+  font-weight: 700;
+}
+
+.gps-yas.eksik {
+  color: var(--soluk);
+  font-style: italic;
+}
+
+.kart.eta-eski {
+  border-color: color-mix(in srgb, var(--uyari) 45%, var(--cizgi));
+  background: color-mix(in srgb, var(--uyari-yumusak) 30%, var(--kart));
+}
+
+.kart.eta-uyari {
+  border-color: color-mix(in srgb, var(--hata) 40%, var(--cizgi));
+}
+
+.kart.eta-eksik {
+  border-style: dashed;
+}
+
+.eta-detay-kart.canli-kart {
+  background: var(--vurgu-yumusak);
+}
+
+.eta-detay-kart.eski-kart {
+  background: var(--uyari-yumusak);
+  border: 1px dashed color-mix(in srgb, var(--uyari) 55%, transparent);
+}
+
+.eta-detay-kart.uyari-kart {
+  background: var(--hata-yumusak);
+  border: 1px solid color-mix(in srgb, var(--hata) 40%, transparent);
+}
+
+.eta-detay-kart.eksik-kart {
+  background: var(--kart-2);
+  border: 1px dashed var(--cizgi);
+}
+
+.eta-guven-serit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+
+.eta-not {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--yazi);
+  margin-top: 4px;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.arac-cip.eski {
+  box-shadow: 0 0 0 1px var(--uyari);
+}
+
+.arac-cip.eski:focus-visible {
+  outline-offset: 3px;
+}
+
 .saglik-satir {
   display: flex;
   align-items: center;

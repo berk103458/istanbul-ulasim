@@ -1,6 +1,7 @@
 import L from "leaflet";
 import { Bridge } from "../core/bridge.js";
 import { KV } from "../core/storage.js";
+import { t } from "../i18n/index.js";
 import { hataMesaji } from "../map/mapController.js";
 import { iconSvg } from "../ui/icons.js";
 import { HIZLI_SEMTLER } from "../views/nearbyView.js";
@@ -76,6 +77,10 @@ export function bindViewEvents(store, mc, { navigation, panelView, views, pwaIns
       if (i >= 0) S.favoriler.splice(i, 1);
       else S.favoriler.push(d.fav);
       KV.set("favoriler", S.favoriler);
+      const label = t(i >= 0 ? "bus.favAdd" : "bus.favRemove", { hat: d.fav });
+      el.setAttribute("aria-pressed", String(i < 0));
+      el.setAttribute("aria-label", label);
+      el.title = label;
       el.innerHTML = iconSvg(i >= 0 ? "star" : "starFill", 20);
       return;
     }

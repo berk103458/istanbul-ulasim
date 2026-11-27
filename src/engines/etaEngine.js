@@ -1,5 +1,34 @@
 import { Core } from "../core/geo.js";
 
+const DAY_MS = 86_400_000;
+const TURKEY_OFFSET_MS = 3 * 3_600_000;
+export const STALE_GPS_SEC = 240;
+
+// İETT sends contemporary Türkiye wall time when the feed omits an offset.
+export function parseIettGpsTimestamp(value, now = Date.now()) {
+  let timestamp = value;
+  if (typeof value === "string") {
+    const input = value.trim();
+    const clock = /^(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(input);
+    if (clock) {
+      const [, hour, minute, second = "00"] = clock;
+      if (+hour > 23 || +minute > 59 || +second > 59) return null;
+      const today = Math.floor((now + TURKEY_OFFSET_MS) / DAY_MS) * DAY_MS - TURKEY_OFFSET_MS;
+      timestamp = today + (+hour * 3600 + +minute * 60 + +second) * 1000;
+      // Resolve clock-only updates to the nearest day, including just after midnight.
+      if (timestamp - now > DAY_MS / 2) timestamp -= DAY_MS;
+    } else {
+      const date = /^(\d{4}-\d{2}-\d{2})[T ]((?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d+)?)?)(Z|[+-]\d{2}:?\d{2})?$/i.exec(input);
+      if (!date) return null;
+      const [, day, time, offset] = date;
+      const localMs = Date.parse(`${day}T${time}Z`);
+      if (!Number.isFinite(localMs) || new Date(localMs).toISOString().slice(0, 10) !== day) return null;
+      timestamp = offset ? Date.parse(`${day}T${time}${offset}`) : localMs - TURKEY_OFFSET_MS;
+    }
+  }
+  return Number.isFinite(timestamp) && timestamp > 0 && timestamp <= now ? timestamp : null;
+}
+
 /**
  * 9-Factor Dynamic Bus & Metrobus ETA Prediction Engine.
  * Distinguishes live GPS telemetry from scheduled/corridor estimates and detects anomalies honestly.
@@ -7,30 +36,6 @@ import { Core } from "../core/geo.js";
 export const EtaEngine = (() => {
   const YOL_KATSAYISI = 1.15;
   const OFF_ROUTE_M = 450;
-  const STALE_GPS_SEC = 240;
-
-  function parseGpsAgeSec(zamanStr) {
-    if (!zamanStr) return null;
-    if (typeof zamanStr === "number" && Number.isFinite(zamanStr)) {
-      return Math.max(0, Math.round((Date.now() - zamanStr) / 1000));
-    }
-    const s = String(zamanStr).trim();
-    const m = /^(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(s);
-    if (m) {
-      const now = new Date();
-      const dt = new Date(now);
-      dt.setHours(Number(m[1]), Number(m[2]), Number(m[3] || 0), 0);
-      let diff = Math.round((now.getTime() - dt.getTime()) / 1000);
-      if (diff < -43200) diff += 86400;
-      if (diff > 43200) diff -= 86400;
-      return Math.max(0, diff);
-    }
-    const parsed = Date.parse(s);
-    if (Number.isFinite(parsed)) {
-      return Math.max(0, Math.round((Date.now() - parsed) / 1000));
-    }
-    return null;
-  }
 
   /**
    * Predicts dynamic ETA for `bus` arriving at `duraklar[hedefIndex]`.
@@ -45,6 +50,7 @@ export const EtaEngine = (() => {
    *   saniye: number,
    *   hizKmSa: number,
    *   trafikEtkisiDk: number,
+   *   trafficFactored: boolean,
    *   kazaEtkisiDk: number,
    *   duraklamaDk: number,
    *   gecikmeDk: number,
@@ -57,7 +63,7 @@ export const EtaEngine = (() => {
    * } | null}
    */
   function predict(duraklar, bus, hedefIndex, ctx = {}) {
-    if (!Array.isArray(duraklar) || !Core.gecerliKonum(bus) ||
+    if (!Array.isArray(duraklar) || !Core.gecerliKonum(bus) || Math.abs(bus.lat) > 90 || Math.abs(bus.lon) > 180 ||
         !Number.isInteger(hedefIndex) || hedefIndex < 0 || hedefIndex >= duraklar.length) {
       return null;
     }
@@ -65,6 +71,11 @@ export const EtaEngine = (() => {
       if (!Core.gecerliKonum(durak)) return null;
     }
     ctx ??= {};
+
+    const now = Date.now();
+    const gpsMs = parseIettGpsTimestamp(ctx.fleetItem?.zaman ?? bus.zaman, now);
+    const sonGuncellemeSn = gpsMs == null ? null : Math.round((now - gpsMs) / 1000);
+    const freshGps = sonGuncellemeSn != null && sonGuncellemeSn <= STALE_GPS_SEC;
 
     const nearest = Core.enYakinIndex(duraklar, bus);
     const siradaki = Core.siradakiDurak(duraklar, bus);
@@ -84,12 +95,12 @@ export const EtaEngine = (() => {
       uzunlukKm: hat?.uzunlukKm ?? hat?.km,
       seferSuresiDk: hat?.seferSuresiDk ?? hat?.dk,
     });
-    const fleetSpeed = Number(ctx.fleetItem?.hiz ?? bus.hiz);
-    const obsSpeed = Number(ctx.observedSpeedKmH);
+    const fleetSpeed = Number(ctx.fleetItem?.hiz ?? bus.hiz ?? NaN);
+    const obsSpeed = Number(ctx.observedSpeedKmH ?? NaN);
     let hizKmSa = schedSpeed;
-    if (Number.isFinite(obsSpeed) && obsSpeed >= 4) {
+    if (freshGps && Number.isFinite(obsSpeed) && obsSpeed >= 4) {
       hizKmSa = obsSpeed;
-    } else if (Number.isFinite(fleetSpeed) && fleetSpeed >= 4) {
+    } else if (freshGps && Number.isFinite(fleetSpeed) && fleetSpeed >= 4) {
       hizKmSa = fleetSpeed * 0.6 + schedSpeed * 0.4;
     }
 
@@ -98,7 +109,8 @@ export const EtaEngine = (() => {
     const te = ctx.trafficEngine;
     const targetStop = duraklar[hedefIndex];
     const corridor = te && typeof te.getCorridorSpeed === "function" ? te.getCorridorSpeed(bus, targetStop) : null;
-    if (corridor && Number.isFinite(corridor.speedKmH) && corridor.speedKmH > 2) {
+    const hasCorridorSpeed = Number.isFinite(corridor?.speedKmH) && corridor.speedKmH > 2;
+    if (hasCorridorSpeed) {
       const effectiveSpeed = Math.min(35, Math.max(5, corridor.speedKmH * 0.72));
       const baseTravelDk = (metre / 1000 / hizKmSa) * 60;
       const trafficTravelDk = (metre / 1000 / effectiveSpeed) * 60;
@@ -129,9 +141,8 @@ export const EtaEngine = (() => {
     const gecikmeDk = Math.max(0, Math.round((totalDk - scheduledDk) * 10) / 10);
 
     // 7. GPS freshness & anomaly detection
-    const sonGuncellemeSn = parseGpsAgeSec(ctx.fleetItem?.zaman ?? bus.zaman);
     const isTerminal = nearest.index <= 1 || nearest.index >= duraklar.length - 2;
-    const rawSpeed = Number.isFinite(fleetSpeed) ? fleetSpeed : null;
+    const rawSpeed = Number.isFinite(obsSpeed) && obsSpeed >= 0 ? obsSpeed : fleetSpeed;
 
     let durumKod = "ON_TIME";
     let durumEtiket = "Zamanında";
@@ -141,11 +152,11 @@ export const EtaEngine = (() => {
       durumKod = "OFF_ROUTE";
       durumEtiket = "Güzergâh Dışı / Sapma";
       guven = "low";
-    } else if (sonGuncellemeSn != null && sonGuncellemeSn > STALE_GPS_SEC) {
+    } else if (!freshGps) {
       durumKod = "STALE";
-      durumEtiket = "Sinyal Gecikmeli";
+      durumEtiket = sonGuncellemeSn == null ? "GPS Zamanı Yok" : "Sinyal Gecikmeli";
       guven = "low";
-    } else if (rawSpeed != null && rawSpeed < 2 && isTerminal) {
+    } else if (Number.isFinite(rawSpeed) && rawSpeed >= 0 && rawSpeed < 2 && isTerminal) {
       durumKod = "AT_TERMINAL";
       durumEtiket = "Sefer Başı Bekleme";
       guven = "medium";
@@ -165,6 +176,7 @@ export const EtaEngine = (() => {
       saniye,
       hizKmSa: Math.round(hizKmSa * 10) / 10,
       trafikEtkisiDk,
+      trafficFactored: hasCorridorSpeed || kazaEtkisiDk > 0,
       kazaEtkisiDk,
       duraklamaDk,
       gecikmeDk,

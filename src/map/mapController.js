@@ -12,7 +12,7 @@ import { iconSvg } from "../ui/icons.js";
 import { t } from "../i18n/index.js";
 import { DataProvider } from "../engines/dataProvider.js";
 import { TrafficEngine } from "../engines/trafficEngine.js";
-import { EtaEngine } from "../engines/etaEngine.js";
+import { EtaEngine, parseIettGpsTimestamp, STALE_GPS_SEC } from "../engines/etaEngine.js";
 import { TrackingEngine } from "../engines/trackingEngine.js";
 
 const RENKLER = ["#e4572e", "#0f62fe", "#0a8f4f", "#8e44ad", "#d97706", "#0891b2", "#be185d", "#4d7c0f"];
@@ -56,10 +56,7 @@ export const hataMesaji = (e) => {
   return m;
 };
 
-export const iettZaman = (s) => {
-  const m = /(\d{4})-(\d\d)-(\d\d) (\d\d):(\d\d):(\d\d)/.exec(s || "");
-  return m ? new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime() : null;
-};
+export { parseIettGpsTimestamp as iettZaman };
 
 // ---------------- Tile Layer Definitions (100% Keyless) ----------------
 const ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/";
@@ -357,28 +354,34 @@ export function createMapController(S, callbacks) {
     const v = S.hatVeri[hat];
     let degisti = false;
     const gor = new Set();
+    const now = Date.now();
     for (const b of liste || []) {
+      if (!Core.gecerliKonum(b) || Math.abs(b.lat) > 90 || Math.abs(b.lon) > 180) continue;
       const k = hat + "/" + b.kapino;
       gor.add(k);
-      const ms = iettZaman(b.zaman) || Date.now();
+      const ms = parseIettGpsTimestamp(b.zaman, now);
       let a = S.arac.get(k);
       if (!a) {
         a = { hat, kapino: b.kapino, gor: { lat: b.lat, lon: b.lon }, gercek: { lat: b.lat, lon: b.lon, ms }, hiz: null };
         S.arac.set(k, a);
         degisti = true;
-      } else if (ms > a.gercek.ms) {
-        const dt = (ms - a.gercek.ms) / 3600e3;
-        const km = (Core.mesafe(a.gercek, b) / 1000) * 1.15;
-        if (dt > 0 && dt < 0.2) {
-          const o = Math.min(70, km / dt);
+      } else if (ms == null || a.gercek.ms == null || ms > a.gercek.ms) {
+        const dtSec = ms != null && a.gercek.ms != null ? (ms - a.gercek.ms) / 1000 : null;
+        if (dtSec != null && dtSec <= STALE_GPS_SEC && now - ms <= STALE_GPS_SEC * 1000) {
+          const km = (Core.mesafe(a.gercek, b) / 1000) * 1.15;
+          const o = Math.min(70, km / (dtSec / 3600));
           a.hiz = a.hiz == null ? o : a.hiz * 0.5 + o * 0.5;
+        } else {
+          a.hiz = null;
         }
         a.gercek = { lat: b.lat, lon: b.lon, ms };
         a.gor = { lat: b.lat, lon: b.lon };
         degisti = true;
       }
-      a.b = b;
-      a.yon = b.yon;
+      if (ms === a.gercek.ms) {
+        a.b = b;
+        a.yon = b.yon;
+      }
     }
     for (const [k, a] of S.arac) {
       if (a.hat === hat && !gor.has(k)) {
@@ -436,27 +439,23 @@ export function createMapController(S, callbacks) {
     const v = S.hatVeri[hat];
     const liste = v?.duraklar?.[yon];
     if (!liste) return [];
+    const now = Date.now();
     const ctx = {
-      hat,
-      yon,
       hatBilgi: v.bilgi,
-      trafficIndex: Trafik.indeks?.TI ?? null,
-      incidents: Trafik.incidents || [],
+      trafficEngine: Trafik.zaman ? TrafficEngine : undefined,
     };
     return (v.otobusler || [])
       .filter((b) => b.yon === yon)
       .map((b) => {
         const a = S.arac.get(hat + "/" + b.kapino);
-        const p = a ? { ...b, lat: a.gor.lat, lon: a.gor.lon } : b;
-        const hizKmSa = aracHizi(hat, b.kapino);
-        let eta = null;
-        if (typeof EtaEngine?.predict === "function") {
-          eta = EtaEngine.predict(liste, p, hedefIndex, { ...ctx, arac: a, hizKmSa });
-        }
-        if (!eta) {
-          eta = Core.varisTahmini(liste, p, hedefIndex, hizKmSa);
-        }
-        return { bus: b, t: eta, gozlenen: a?.hiz != null || Boolean(eta?.trafficFactored) };
+        const ms = parseIettGpsTimestamp(b.zaman, now);
+        const tracked = a && ms != null && ms === a.gercek.ms && Math.round((now - ms) / 1000) <= STALE_GPS_SEC &&
+          b.lat === a.gercek.lat && b.lon === a.gercek.lon;
+        const p = tracked ? { ...b, lat: a.gor.lat, lon: a.gor.lon } : b;
+        const observedSpeedKmH = tracked ? a.hiz : null;
+        const eta = EtaEngine.predict(liste, p, hedefIndex, { ...ctx, observedSpeedKmH });
+        const gozlenen = Boolean(eta && eta.guven !== "low" && (observedSpeedKmH >= 4 || eta.trafficFactored));
+        return { bus: b, t: eta, gozlenen };
       })
       .filter((x) => x.t)
       .sort((a, b) => a.t.metre - b.t.metre);
@@ -534,6 +533,7 @@ export function createMapController(S, callbacks) {
       const v = S.hatVeri[a.hat];
       const liste = v?.duraklar?.[a.yon];
       if (!liste?.length) continue;
+      if (a.gercek.ms == null) continue;
       const gecen = (Date.now() - a.gercek.ms) / 1000;
       if (gecen > 150 || (a.hiz != null && a.hiz < 3)) continue;
       let kalan = (aracHizi(a.hat, a.kapino) * 0.85) / 3.6;
@@ -849,6 +849,7 @@ export function createMapController(S, callbacks) {
           typeof TrafficEngine?.fetchIncidents === "function" ? TrafficEngine.fetchIncidents().catch(() => []) : Promise.resolve([]),
         ]);
         Trafik.veri = veri;
+        TrafficEngine.setTrafficData(veri, Trafik.ana);
         Trafik.indeks = indeks;
         Trafik.incidents = Array.isArray(incidents) ? incidents : [];
         Trafik.zaman = Date.now();

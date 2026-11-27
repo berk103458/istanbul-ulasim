@@ -7,7 +7,15 @@ import { API } from "../core/api.js";
 import { iconSvg } from "../ui/icons.js";
 import { t } from "../i18n/index.js";
 import { TrafficEngine } from "../engines/trafficEngine.js";
-import { esc, bas, metre, renkKod, sureEtiket, hataMesaji } from "../map/mapController.js";
+import { esc, bas, metre, renkKod, hataMesaji } from "../map/mapController.js";
+import {
+  describeEtaTrust,
+  parseGpsAgeSec,
+  parseGpsTimestampMs,
+  renderTrustBadgesHTML,
+  renderGpsAgeHTML,
+  renderEtaPillHTML,
+} from "../ui/etaIndicators.js";
 import { accessibleBadgeStyle, bindKeyboardActivators } from "./a11y.js";
 
 export const DEFAULT_HUB = { ad: "Kadıköy", lat: 40.9904, lon: 29.0235, varsayilan: true };
@@ -23,22 +31,67 @@ export const HIZLI_SEMTLER = [
 ];
 
 export function otobusSatiriHTML(hat, x) {
-  const key = `${hat}/${x.bus.kapino}`;
-  const etaText = x.t.dakika <= 1 ? t("eta.arriving") : t("eta.min", { n: Math.round(x.t.dakika) });
+  const bus = x?.bus || {};
+  const eta = x?.t || null;
+  const kapino = bus.kapino || "";
+  const key = `${hat}/${kapino}`;
+  const isScheduled = Boolean(x?.scheduled || x?.tarife || x?.kaynak === "tarife" || eta?.kaynak === "tarife");
+  const fallbackAgeSec = eta?.sonGuncellemeSn != null ? eta.sonGuncellemeSn : parseGpsAgeSec(bus.zaman);
+  const validMs = isScheduled ? null : parseGpsTimestampMs(bus.zaman);
+  const info = describeEtaTrust(eta, {
+    scheduled: isScheduled,
+    fallbackAgeSec,
+    saatStr: x?.saatStr || "",
+  });
+
+  const stopLabel =
+    eta && Number.isFinite(eta.durakSayisi)
+      ? eta.durakSayisi === 0
+        ? t("eta.stopNext")
+        : t("eta.stopsAway", { n: eta.durakSayisi })
+      : info.isScheduled
+      ? t("eta.sourceSchedule")
+      : t("eta.dataMissing");
+
+  const badgesHTML = renderTrustBadgesHTML(info, { compact: true });
+  const gpsAgeHTML = renderGpsAgeHTML(info, { prefix: true, liveMs: validMs });
+  const pillHTML = renderEtaPillHTML(info);
+  const hasTrafficImpact = Boolean(
+    !info.isScheduled &&
+      !info.isStale &&
+      !info.isOffRoute &&
+      !info.isMissing &&
+      ((Number.isFinite(eta?.trafikEtkisiDk) && eta.trafikEtkisiDk > 0) ||
+        (Number.isFinite(eta?.kazaEtkisiDk) && eta.kazaEtkisiDk > 0) ||
+        eta?.trafficFactored)
+  );
+
+  const metaParts = [];
+  if (eta && Number.isFinite(eta.metre)) {
+    metaParts.push(`<span>${esc(t("eta.distanceAway", { m: metre(eta.metre) }))}</span>`);
+  }
+  if (kapino) metaParts.push(`<span>${esc(kapino)}</span>`);
+  if (gpsAgeHTML) metaParts.push(gpsAgeHTML);
+  if (hasTrafficImpact) metaParts.push(`<span>${esc(t("eta.trafficFactored"))}</span>`);
+  const metaHTML = metaParts.join('<span aria-hidden="true">·</span>');
+
+  const liveAttrs =
+    info.canSurgicalUpdate && kapino && info.dakika != null
+      ? ` data-live-eta="${esc(key)}" data-live-dk="${info.dakika}"`
+      : "";
+  const rowCls = info.rowClass ? ` ${info.rowClass}` : "";
+  const dataOdakla = kapino ? ` role="button" tabindex="0" data-odakla="${esc(key)}"` : "";
+
   return `
-    <div class="kart satir tik" role="button" tabindex="0" data-odakla="${esc(key)}">
+    <div class="kart satir tik eta-satir${rowCls}"${dataOdakla}>
       <div class="kart-sol">
         <div class="bas">
-          ${x.t.durakSayisi === 0 ? esc(t("eta.stopNext")) : esc(t("eta.stopsAway", { n: x.t.durakSayisi }))}
-          ${x.gozlenen ? `<span class="canli">${esc(t("common.live"))}</span>` : ""}
+          <span>${esc(stopLabel)}</span>
+          ${badgesHTML}
         </div>
-        <div class="alt">
-          <span>${esc(t("eta.distanceAway", { m: metre(x.t.metre) }))}</span>
-          <span>· ${esc(x.bus.kapino)}</span>
-          ${x.gozlenen ? `<span>· ${esc(t("eta.trafficFactored"))}</span>` : ""}
-        </div>
+        <div class="alt">${metaHTML}</div>
       </div>
-      <div class="kart-sag" data-live-eta="${esc(key)}" data-live-dk="${Math.round(x.t.dakika)}">${sureEtiket(x.t.dakika).replace(/>[^<]+</, `>${esc(etaText)}<`)}</div>
+      <div class="kart-sag"${liveAttrs}>${pillHTML}</div>
     </div>`;
 }
 
