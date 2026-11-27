@@ -10,7 +10,15 @@ import { iconSvg } from "../ui/icons.js";
 import { t, getLang, setLang } from "../i18n/index.js";
 import { DataProvider } from "../engines/dataProvider.js";
 import { GoogleMapsService } from "../services/googleMapsService.js";
-import { esc, bas, metre, saat, renkKod, sureEtiket, hataMesaji } from "../map/mapController.js";
+import { esc, bas, metre, saat, renkKod, hataMesaji } from "../map/mapController.js";
+import {
+  describeEtaTrust,
+  parseGpsAgeSec,
+  parseGpsTimestampMs,
+  renderTrustBadgesHTML,
+  renderGpsAgeHTML,
+  renderEtaPillHTML,
+} from "../ui/etaIndicators.js";
 import { accessibleBadgeStyle, bindKeyboardActivators } from "./a11y.js";
 
 const FOCUSABLE_SELECTOR = [
@@ -23,6 +31,44 @@ const FOCUSABLE_SELECTOR = [
 ].join(",");
 
 const BACKGROUND_REGIONS = ["#harita", ".harita-ust-sol", ".harita-ust-sag", "#secimBandi", "#panel", "#sekmeler"];
+
+export function renderStopBoardRowHTML(k) {
+  const isScheduled = k.scheduled ?? (!k.canli && !k.eta?.durumKod && !k.kapino);
+  const etaObj = k.eta || (Number.isFinite(k.kalan) ? { dakika: k.kalan } : null);
+  const fallbackAgeSec = etaObj?.sonGuncellemeSn != null ? etaObj.sonGuncellemeSn : parseGpsAgeSec(k.busZaman);
+  const validMs = isScheduled ? null : parseGpsTimestampMs(k.busZaman);
+  const trust = describeEtaTrust(etaObj, {
+    scheduled: isScheduled,
+    realtimeFeed: Boolean(k.canli && !k.kapino && !k.eta?.durumKod),
+    fallbackAgeSec,
+    saatStr: k.saatStr || "",
+  });
+
+  const badgesHTML = renderTrustBadgesHTML(trust, { compact: true });
+  const gpsAgeHTML = renderGpsAgeHTML(trust, { prefix: true, liveMs: validMs });
+  const pillHTML = renderEtaPillHTML(trust);
+  const rowCls = trust.rowClass ? ` ${trust.rowClass}` : "";
+  const clockPrefix = !trust.isScheduled && !trust.isLive ? "~" : "";
+
+  const metaParts = [badgesHTML];
+  if (k.kapino) metaParts.push(`<span>${esc(k.kapino)}</span>`);
+  if (gpsAgeHTML) metaParts.push(gpsAgeHTML);
+  if (k.saatStr) metaParts.push(`<span>${esc(clockPrefix + k.saatStr)}</span>`);
+
+  return `
+          <div class="kart satir tik eta-satir${rowCls}" role="button" tabindex="0" data-modal-hat="${esc(k.hat)}" ${k.kapino ? `data-modal-arac="${esc(k.kapino)}"` : ""}>
+            <div class="kart-sol">
+              <div class="bas">
+                <span class="rozet" style="${accessibleBadgeStyle(k.renk)}">${esc(k.hat)}</span>
+                <span>→ ${esc(k.yon || t("modal.center"))}</span>
+              </div>
+              <div class="alt">
+                ${metaParts.filter(Boolean).join('<span aria-hidden="true">·</span>')}
+              </div>
+            </div>
+            <div class="kart-sag">${pillHTML}</div>
+          </div>`;
+}
 
 export function createStopModal(S, mc, callbacks) {
   bindKeyboardActivators();
@@ -239,12 +285,16 @@ export function createStopModal(S, mc, callbacks) {
             }
             const kalan = dk != null ? dk - simdi : item.kalanDk;
             if (kalan != null && kalan >= -1 && kalan <= 180) {
+              const isRealTime = Boolean(item.canli || item.realTime);
+              const kalanDk = Math.max(0, Math.round(kalan));
               kalkislar.push({
                 hat: item.hat || item.routeShortName || "?",
                 yon: item.yon || item.headsign || "",
-                kalan: Math.max(0, Math.round(kalan)),
+                kalan: kalanDk,
                 saatStr: dk != null ? saat(dk) : "",
-                canli: Boolean(item.canli || item.realTime),
+                canli: isRealTime,
+                scheduled: !isRealTime,
+                eta: { dakika: kalanDk },
                 renk: renkKod(item.hat || item.routeShortName || ""),
               });
             }
@@ -289,13 +339,17 @@ export function createStopModal(S, mc, callbacks) {
               if (i < 0) continue;
               const gel = mc.yaklasanOtobusler(hat, yon, i).slice(0, 2);
               for (const g of gel) {
+                const dakika = Number.isFinite(g.t?.dakika) ? g.t.dakika : null;
                 kalkislar.push({
                   hat,
-                  yon: bas(liste[liste.length - 1]?.ad || g.bus.yonAdi || ""),
-                  kalan: g.t.dakika,
-                  saatStr: saat(simdi + g.t.dakika),
-                  canli: true,
-                  kapino: g.bus.kapino,
+                  yon: bas(liste[liste.length - 1]?.ad || g.bus?.yonAdi || ""),
+                  kalan: dakika,
+                  saatStr: dakika != null ? saat(simdi + dakika) : "",
+                  canli: false,
+                  scheduled: false,
+                  eta: g.t || null,
+                  busZaman: g.bus?.zaman ?? null,
+                  kapino: g.bus?.kapino || "",
                   renk: v.renk || renkKod(hat),
                 });
               }
@@ -308,7 +362,7 @@ export function createStopModal(S, mc, callbacks) {
 
       if (!document.querySelector("#modalGovde")) return;
 
-      kalkislar.sort((a, b) => a.kalan - b.kalan);
+      kalkislar.sort((a, b) => (a.kalan ?? Infinity) - (b.kalan ?? Infinity));
       const tekil = [];
       const gor = new Set();
       for (const k of kalkislar) {
@@ -325,23 +379,7 @@ export function createStopModal(S, mc, callbacks) {
 
       govde.innerHTML = `<div class="liste">${tekil
         .slice(0, 15)
-        .map(
-          (k) => `
-          <div class="kart satir tik" role="button" tabindex="0" data-modal-hat="${esc(k.hat)}" ${k.kapino ? `data-modal-arac="${esc(k.kapino)}"` : ""}>
-            <div class="kart-sol">
-              <div class="bas">
-                <span class="rozet" style="${accessibleBadgeStyle(k.renk)}">${esc(k.hat)}</span>
-                <span>→ ${esc(k.yon || t("modal.center"))}</span>
-              </div>
-              <div class="alt">
-                ${k.canli ? `<span class="canli">${esc(t("common.live"))}</span>` : `<span class="rozet soluk">${esc(t("common.schedule"))}</span>`}
-                ${k.kapino ? `<span>${esc(k.kapino)}</span>` : ""}
-                ${k.saatStr ? `<span>· ${esc(k.saatStr)}</span>` : ""}
-              </div>
-            </div>
-            <div class="kart-sag">${sureEtiket(k.kalan)}</div>
-          </div>`
-        )
+        .map(renderStopBoardRowHTML)
         .join("")}</div>`;
 
       govde.querySelectorAll("[data-modal-hat]").forEach((row) => {
@@ -556,10 +594,7 @@ export function createStopModal(S, mc, callbacks) {
 
     document.querySelector("#cacheTemizleBtn")?.addEventListener("click", async () => {
       try {
-        if (typeof KV.clear === "function") await KV.clear();
-        for (const k of Object.keys(localStorage)) {
-          if (k.startsWith("ulasim.") && k !== "ulasim.lang") localStorage.removeItem(k);
-        }
+        await KV.clearCache();
         if ("caches" in window) {
           const keys = await caches.keys();
           await Promise.all(keys.map((k) => caches.delete(k)));

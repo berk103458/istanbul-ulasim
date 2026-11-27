@@ -1,7 +1,11 @@
 // ---- Kalıcı depolama: IndexedDB (100MB+ destekli) + localStorage ----
 const DB_NAME = "istanbul-ulasim-v4";
 const STORE_NAME = "kv";
-const PREF_KEYS = new Set(["favoriler", "durak", "sonYerler", "savedPlaces", "tema", "mapStyle", "proxyUrl", "trafik", "ispark"]);
+const LS_PREFIX = "ulasim.";
+const PREF_KEYS = new Set([
+  "favoriler", "favoriDuraklar", "durak", "sonYerler", "savedPlaces",
+  "tema", "mapStyle", "proxyUrl", "trafik", "ispark",
+]);
 
 let dbPromise = null;
 
@@ -26,7 +30,7 @@ function openDb() {
 
 function lsGet(key) {
   try {
-    const raw = localStorage.getItem("ulasim." + key);
+    const raw = localStorage.getItem(LS_PREFIX + key);
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
@@ -35,7 +39,7 @@ function lsGet(key) {
 
 function lsSet(key, val) {
   try {
-    localStorage.setItem("ulasim." + key, JSON.stringify(val));
+    localStorage.setItem(LS_PREFIX + key, JSON.stringify(val));
   } catch {}
 }
 
@@ -99,7 +103,7 @@ export const KV = {
           tx.onerror = () => res(false);
         });
       }
-      try { localStorage.removeItem("ulasim." + key); } catch {}
+      try { localStorage.removeItem(LS_PREFIX + key); } catch {}
     } catch {}
   },
 
@@ -123,6 +127,15 @@ export const KV = {
             tx.onerror = () => res(false);
           });
         }
+      }
+    } catch {}
+
+    try {
+      for (const storageKey of Object.keys(localStorage)) {
+        if (!storageKey.startsWith(LS_PREFIX)) continue;
+        const key = storageKey.slice(LS_PREFIX.length);
+        // The i18n module stores its language as a raw localStorage value.
+        if (key !== "lang" && !PREF_KEYS.has(key)) localStorage.removeItem(storageKey);
       }
     } catch {}
   },

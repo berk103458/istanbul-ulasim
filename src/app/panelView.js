@@ -61,6 +61,9 @@ export function createPanelView(S, mc, views, { sayfa }, pwaInstall) {
       const aktif = document.activeElement;
       const id = aktif && aktif.id;
       const pos = aktif && aktif.selectionStart;
+      const focusAttrs = !sayfaDegisti && !id && ic.contains(aktif)
+        ? [...aktif.attributes].filter(({ name }) => name.startsWith("data-"))
+        : [];
 
       ic.innerHTML = pwaInstall.renderBanner() + html;
 
@@ -74,6 +77,12 @@ export function createPanelView(S, mc, views, { sayfa }, pwaInstall) {
             // ignore
           }
         }
+      } else if (focusAttrs.length) {
+        const [first] = focusAttrs;
+        const replacement = [...ic.querySelectorAll(`[${first.name}]`)].find((el) =>
+          el.tabIndex >= 0 && focusAttrs.every(({ name, value }) => el.getAttribute(name) === value)
+        );
+        replacement?.focus({ preventScroll: true });
       }
     } catch (e) {
       if (no !== cizimNo) return;

@@ -1,64 +1,35 @@
 import { DataProvider } from "../engines/dataProvider.js";
 import { NotificationEngine } from "../engines/notificationEngine.js";
-import { t } from "../i18n/index.js";
+import { formatGpsAge, FRESH_GPS_SEC, STALE_GPS_SEC } from "../ui/etaIndicators.js";
 
 const CANLI_SN = 5;
 
 export function createLiveUpdates(S, mc, { sayfa, ciz }) {
   let panelZamanlayici = null;
 
-  function surgicalLiveUpdate() {
+  function refreshLiveAges() {
     const ic = document.querySelector("#icerik");
-    if (!ic) return false;
+    if (!ic) return;
 
-    // Update live age counters in-place
+    const now = Date.now();
+    let becameStale = false;
     ic.querySelectorAll("[data-live-age]").forEach((el) => {
       const ms = Number(el.dataset.liveAge);
-      if (!isFinite(ms) || ms <= 0) return;
-      const yas = Math.max(0, Math.round((Date.now() - ms) / 1000));
-      el.textContent = yas < 90 ? t("eta.secAgo", { n: yas }) : t("eta.minAgo", { n: Math.round(yas / 60) });
+      if (!Number.isFinite(ms) || ms <= 0) return;
+      const age = Math.round((now - ms) / 1000);
+      el.textContent = formatGpsAge(age);
+      const badge = el.closest(".gps-yas");
+      if (age > STALE_GPS_SEC && badge?.matches(".taze, .orta")) becameStale = true;
+      else if (age > FRESH_GPS_SEC) badge?.classList.replace("taze", "orta");
     });
+    if (becameStale) panelYenile();
 
-    // Update live ETA elements in-place when order/count hasn't changed
-    const etaEls = ic.querySelectorAll("[data-live-eta]");
-    if (!etaEls.length) return false;
-
-    let anyMismatch = false;
-    const p = sayfa();
-
-    etaEls.forEach((el) => {
-      const key = el.dataset.liveEta;
-      const [hat, kapino] = String(key || "").split("/");
-      const a = S.arac.get(key);
-      if (!a || !hat || !kapino) {
-        anyMismatch = true;
-        return;
-      }
-      const hd = mc.hedefDurak(hat, a.yon);
-      if (!hd) return;
-      const list = mc.yaklasanOtobusler(hat, a.yon, hd.i);
-      const match = list.find((x) => x.bus.kapino === kapino);
-      if (!match) {
-        anyMismatch = true;
-        return;
-      }
-      const dk = Math.round(match.t.dakika);
-      const sureSpan = el.querySelector(".sure") || (el.classList.contains("sure") ? el : null);
-      if (sureSpan) {
-        sureSpan.classList.toggle("yakin", dk <= 3);
-        sureSpan.textContent = dk <= 1 ? t("eta.arriving") : `~${dk} dk`;
-      }
-    });
-
-    if (typeof NotificationEngine?.checkUpdates === "function") {
+    if (!becameStale && ic.querySelector("[data-live-eta]") && typeof NotificationEngine?.checkUpdates === "function") {
       NotificationEngine.checkUpdates(S, mc).catch(() => {});
     }
-
-    return !anyMismatch && p.tur !== "hat";
   }
 
   function panelYenile() {
-    if (surgicalLiveUpdate()) return;
     clearTimeout(panelZamanlayici);
     panelZamanlayici = setTimeout(() => ciz(false), 120);
   }
@@ -69,7 +40,7 @@ export function createLiveUpdates(S, mc, { sayfa, ciz }) {
       if (!document.hidden) {
         mc.oluHesap();
         mc.tahminiCiz();
-        surgicalLiveUpdate();
+        refreshLiveAges();
       }
     }, 1000);
     setInterval(() => {

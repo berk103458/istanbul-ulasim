@@ -1,11 +1,13 @@
-// Faz 2 — EtaEngine birim testleri (node:test). Kaynak dosyalara dokunulmaz.
+// EtaEngine birim testleri (node:test).
 // Zaman sabitlenir (node:test mock.timers Date), ağ kullanılmaz.
 import test, { describe } from "node:test";
 import assert from "node:assert/strict";
 
 import { EtaEngine } from "../../src/engines/etaEngine.js";
 import { Core } from "../../src/core/geo.js";
-import { FIXED_MS, freezeTime } from "../fixtures/helpers.mjs";
+import { freezeTime } from "../fixtures/helpers.mjs";
+
+const FIXED_MS = Date.parse("2026-11-26T12:00:00+03:00");
 
 // 3 durak, ~84m arayla; kodlu duraklar (gerçek IETT durakları gibi).
 const STOPS = [
@@ -29,9 +31,8 @@ describe("EtaEngine.predict — temel hesap", () => {
     assert.equal(r.trafikEtkisiDk, 0);
     assert.equal(r.kazaEtkisiDk, 0);
     assert.equal(r.gecikmeDk, 0);
-    assert.equal(r.durumKod, "ON_TIME");
-    assert.equal(r.durumEtiket, "Zamanında");
-    assert.equal(r.guven, "high");
+    assert.equal(r.durumKod, "STALE");
+    assert.equal(r.guven, "low");
     assert.equal(r.sonGuncellemeSn, null);
     assert.equal(r.plaka, "");
     assert.equal(r.operator, "İETT");
@@ -98,8 +99,9 @@ describe("EtaEngine.predict — ETA sınırları (bounds)", () => {
     assert.equal(nan.saniye, base.saniye);
   });
 
-  test("scheduledOffsetMin toplamı artırır + DELAYED tetikler", () => {
-    const r = EtaEngine.predict(STOPS, { lat: 41.0, lon: 29.0 }, 2, { scheduledOffsetMin: 10 });
+  test("scheduledOffsetMin toplamı artırır + DELAYED tetikler", (t) => {
+    freezeTime(t, FIXED_MS);
+    const r = EtaEngine.predict(STOPS, { ...STOPS[0], zaman: FIXED_MS }, 2, { scheduledOffsetMin: 10 });
     assert.ok(r);
     assert.ok(r.gecikmeDk >= 2, `gecikme ${r.gecikmeDk}`);
     assert.equal(r.durumKod, "DELAYED", "totalDk > scheduled*1.2 && gecikme>=2");
@@ -132,8 +134,9 @@ describe("EtaEngine.predict — hız faktörleri", () => {
     assert.equal(r.hizKmSa, 24, "İETT verisi: 12 km / 30 dk = 24 km/sa");
   });
 
-  test("observedSpeedKmH >=4 → hiz; <4 → yok sayılır", () => {
-    const bus = { lat: 41.0, lon: 29.0 };
+  test("observedSpeedKmH >=4 → hiz; <4 → yok sayılır", (t) => {
+    freezeTime(t, FIXED_MS);
+    const bus = { ...STOPS[0], zaman: FIXED_MS };
     let r = EtaEngine.predict(STOPS, bus, 2, { observedSpeedKmH: 30 });
     assert.equal(r.hizKmSa, 30);
     r = EtaEngine.predict(STOPS, bus, 2, { observedSpeedKmH: 3 });
@@ -142,23 +145,25 @@ describe("EtaEngine.predict — hız faktörleri", () => {
     assert.equal(r.hizKmSa, 15);
   });
 
-  test("fleetSpeed >=4 → 0.6*fleet + 0.4*sched blend; obs öncelikli", () => {
-    const bus = { lat: 41.0, lon: 29.0, hiz: 20 };
+  test("fleetSpeed >=4 → 0.6*fleet + 0.4*sched blend; obs öncelikli", (t) => {
+    freezeTime(t, FIXED_MS);
+    const bus = { ...STOPS[0], zaman: FIXED_MS, hiz: 20 };
     let r = EtaEngine.predict(STOPS, bus, 2, {});
     assert.equal(r.hizKmSa, 18, "0.6*20 + 0.4*15 = 18");
     // ctx.fleetItem.hiz ?? bus.hiz
-    r = EtaEngine.predict(STOPS, { lat: 41.0, lon: 29.0 }, 2, { fleetItem: { hiz: 40 } });
+    r = EtaEngine.predict(STOPS, bus, 2, { fleetItem: { hiz: 40 } });
     assert.equal(r.hizKmSa, 30, "0.6*40+0.4*15=30");
     // obsSpeed overrides fleet
     r = EtaEngine.predict(STOPS, bus, 2, { observedSpeedKmH: 100 });
     assert.equal(r.hizKmSa, 100);
     // fleetSpeed <4 → yok sayılır
-    r = EtaEngine.predict(STOPS, { lat: 41.0, lon: 29.0, hiz: 1 }, 2, {});
+    r = EtaEngine.predict(STOPS, { ...bus, hiz: 1 }, 2, {});
     assert.equal(r.hizKmSa, 15);
   });
 
-  test("baseRunDk hiz tabanı max(5, hizKmSa); scheduledDk tabanı max(8, schedSpeed)", () => {
-    const bus = { lat: 41.0, lon: 29.0 };
+  test("baseRunDk hiz tabanı max(5, hizKmSa); scheduledDk tabanı max(8, schedSpeed)", (t) => {
+    freezeTime(t, FIXED_MS);
+    const bus = { ...STOPS[0], zaman: FIXED_MS };
     const r = EtaEngine.predict(STOPS, bus, 2, { observedSpeedKmH: 4 });
     assert.equal(r.hizKmSa, 4, "hizKmSa=4 çıktı");
     // baseRunDk max(5,4)=5; scheduledDk max(8,15)=15; scheduled kullanır schedSpeed=15
@@ -188,6 +193,7 @@ describe("EtaEngine.predict — trafik & kaza etkileri", () => {
     assert.ok(r.trafikEtkisiDk >= 0);
     // hizKmSa=(hiz+effective)/2; effective=min35 max5 (20*0.72=14.4); hiz=15→(15+14.4)/2=14.7
     assert.equal(r.hizKmSa, 14.7);
+    assert.equal(r.trafficFactored, true);
     // trafikEtkisiDk=max(0,round((traffic@effective - base@hiz)*10)/10); kısa mesafede 0.1'e yuvarlanır
     assert.ok(r.trafikEtkisiDk >= 0);
   });
@@ -198,6 +204,7 @@ describe("EtaEngine.predict — trafik & kaza etkileri", () => {
       const r = EtaEngine.predict(STOPS, bus, 2, { trafficEngine: { getCorridorSpeed: () => c } });
       assert.equal(r.trafikEtkisiDk, 0);
       assert.equal(r.hizKmSa, 15);
+      assert.equal(r.trafficFactored, false);
     }
   });
 
@@ -276,31 +283,32 @@ describe("EtaEngine.predict — GPS tazeliği & durum kodları (zaman sabitlenmi
 
   test("durumKod AT_TERMINAL: rawSpeed<2 + terminal; guven medium", (t) => {
     freezeTime(t, FIXED_MS);
-    let r = EtaEngine.predict(STOPS, { lat: 41.0, lon: 29.0, hiz: 0 }, 2, {});
+    const bus = { ...STOPS[0], zaman: FIXED_MS };
+    let r = EtaEngine.predict(STOPS, { ...bus, hiz: 0 }, 2, {});
     assert.equal(r.durumKod, "AT_TERMINAL");
     assert.equal(r.guven, "medium");
     // isTerminal: nearest.index<=1 || >=len-2
-    r = EtaEngine.predict(STOPS, { lat: 41.0, lon: 29.0, hiz: 1 }, 1, {});
+    r = EtaEngine.predict(STOPS, bus, 1, { observedSpeedKmH: 1 });
     assert.equal(r.durumKod, "AT_TERMINAL", "nearest<=1 terminal");
     // hiz>=2 → not terminal
-    r = EtaEngine.predict(STOPS, { lat: 41.0, lon: 29.0, hiz: 5 }, 2, {});
-    assert.notEqual(r.durumKod, "AT_TERMINAL");
+    r = EtaEngine.predict(STOPS, { ...bus, hiz: 0 }, 2, { observedSpeedKmH: 5 });
+    assert.equal(r.durumKod, "ON_TIME");
   });
 
-  test("durumKod DELAYED: totalDk>scheduled*1.2 && gecikme>=2; guven medium", () => {
-    const r = EtaEngine.predict(STOPS, { lat: 41.0, lon: 29.0 }, 2, { scheduledOffsetMin: 10 });
+  test("durumKod DELAYED: totalDk>scheduled*1.2 && gecikme>=2; guven medium", (t) => {
+    freezeTime(t, FIXED_MS);
+    const r = EtaEngine.predict(STOPS, { ...STOPS[0], zaman: FIXED_MS }, 2, { scheduledOffsetMin: 10 });
     assert.equal(r.durumKod, "DELAYED");
     assert.equal(r.guven, "medium");
   });
 
-  test("sonGuncellemeSn parseGpsAgeSec: numeric ms, HH:MM(:SS), ISO, max(0), null", (t) => {
+  test("sonGuncellemeSn: epoch ms, Türkiye saati ve açık ISO ofseti", (t) => {
     freezeTime(t, FIXED_MS);
     const at = (zaman) => EtaEngine.predict(STOPS, { lat: 41.0, lon: 29.0, zaman }, 2, {}).sonGuncellemeSn;
     // numeric epoch ms
     assert.equal(at(FIXED_MS), 0);
     assert.equal(at(FIXED_MS - 5000), 5);
-    assert.equal(at(FIXED_MS + 5000), 0, "gelecek → max(0,..)=0");
-    // HH:MM(:SS) — FIXED local 12:00
+    // HH:MM(:SS) — Türkiye saati 12:00
     assert.equal(at("12:00"), 0);
     assert.equal(at("11:59"), 60);
     assert.equal(at("11:59:30"), 30);
@@ -308,12 +316,50 @@ describe("EtaEngine.predict — GPS tazeliği & durum kodları (zaman sabitlenmi
     assert.equal(at("12:00:00"), 0);
     // ISO
     assert.equal(at("2026-11-26T11:59:00"), 60);
-    // null cases
-    assert.equal(at(undefined), null);
-    assert.equal(at(""), null);
-    assert.equal(at(null), null);
-    assert.equal(at("not a date"), null);
-    assert.equal(at("garbage"), null);
+    assert.equal(at("2026-11-26 11:59:00.250000"), 60);
+    assert.equal(at("2026-11-26T08:59:00Z"), 60);
+    assert.equal(at("2026-11-26T10:59:00+0200"), 60);
+    const fresh = EtaEngine.predict(STOPS, { ...STOPS[0], zaman: "2026-11-26 11:59:00" }, 2);
+    assert.equal(fresh.durumKod, "ON_TIME");
+    assert.equal(fresh.guven, "high");
+  });
+
+  test("Türkiye'de gece yarısından önce gelen saat-only GPS kaydı", (t) => {
+    freezeTime(t, Date.parse("2026-11-27T00:00:30+03:00"));
+    const r = EtaEngine.predict(STOPS, { ...STOPS[0], zaman: "23:59:45" }, 2);
+    assert.equal(r.sonGuncellemeSn, 45);
+    assert.equal(r.guven, "high");
+  });
+
+  test("eksik, geçersiz veya eski GPS canlı hız ve güven üretmez", (t) => {
+    freezeTime(t, FIXED_MS);
+    for (const zaman of [undefined, null, "", "garbage", "12:99", "24:00", "12:00:60",
+      "2026-02-30 12:00:00", "2026-11-26 12:00:01", "12:00:01", FIXED_MS + 5000,
+      "2026-11-26 11:55:59"]) {
+      const r = EtaEngine.predict(STOPS, { ...STOPS[0], zaman, hiz: 25 }, 2, { observedSpeedKmH: 40 });
+      assert.equal(r.sonGuncellemeSn, zaman === "2026-11-26 11:55:59" ? 241 : null, String(zaman));
+      assert.equal(r.durumKod, "STALE");
+      assert.equal(r.guven, "low");
+      assert.equal(r.hizKmSa, 15);
+    }
+  });
+
+  test("geçerli GPS ile gözlenen hız, koridor hızı ve olay gecikmesi birlikte kullanılır", (t) => {
+    freezeTime(t, FIXED_MS);
+    const bus = { ...STOPS[0], zaman: "11:59", hiz: 40 };
+    const trafficEngine = {
+      getCorridorSpeed(from, to) {
+        assert.equal(from, bus);
+        assert.equal(to, STOPS[2]);
+        return { speedKmH: 25 };
+      },
+      getIncidentPenalty: () => ({ penaltyMin: 5 }),
+    };
+    const r = EtaEngine.predict(STOPS, bus, 2, { observedSpeedKmH: 30, trafficEngine });
+    assert.equal(r.hizKmSa, 24); // (30 + 25 * 0.72) / 2
+    assert.equal(r.kazaEtkisiDk, 5);
+    assert.equal(r.trafficFactored, true);
+    assert.equal(r.sonGuncellemeSn, 60);
   });
 
   test("fleetItem.zaman ?? bus.zaman", (t) => {
@@ -353,7 +399,7 @@ describe("EtaEngine.predict — boş/bozuk veri", () => {
   });
 
   test("bozuk araç koordinatları → yakın durak kodu eşleşse de null", () => {
-    for (const konum of [{ lat: NaN, lon: 29 }, { lat: 41 }, { lat: null, lon: 29 }]) {
+    for (const konum of [{ lat: NaN, lon: 29 }, { lat: 41 }, { lat: null, lon: 29 }, { lat: 91, lon: 29 }, { lat: 41, lon: 181 }]) {
       assert.equal(EtaEngine.predict(STOPS, { ...konum, yakinDurak: STOPS[0].kod }, 2), null);
     }
   });
