@@ -62,6 +62,20 @@ describe("createStore(initial)", () => {
     assert.equal(log.length, 3, "tüm aboneler ayrıldıktan sonra bildirim yapılmamalı");
   });
 
+  test("aynı değerle set() diğer alanları korur ve aboneye bildirim gönderir", () => {
+    const rota = { filtre: "onerilen" };
+    const store = createStore({ sekme: "yakin", rota });
+    const calls = [];
+    store.subscribe((state) => calls.push(state));
+
+    store.set({ sekme: "yakin" });
+
+    assert.deepEqual(store.get(), { sekme: "yakin", rota });
+    assert.equal(store.get().rota, rota);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0], store.get());
+  });
+
   test("aynı abone fonksiyonu iki kez eklendiğinde tek bildirim alır", () => {
     const store = createStore({ n: 0 });
     let calls = 0;
@@ -124,7 +138,8 @@ describe("createStore(initial)", () => {
     assert.deepEqual(store.get().rota.son, [{ ad: "Üsküdar" }]);
 
     // Doğrudan sığ değişim (derin birleştirme yapılmadığını doğrula)
-    store.set({ savedPlaces: { ev: { ad: "Yeni Ev" } } });
+    store.set({ rota: { filtre: "enKisa" }, savedPlaces: { ev: { ad: "Yeni Ev" } } });
+    assert.deepEqual(store.get().rota, { filtre: "enKisa" });
     assert.deepEqual(store.get().savedPlaces, { ev: { ad: "Yeni Ev" } });
     assert.equal("is" in store.get().savedPlaces, false);
   });
@@ -136,6 +151,8 @@ describe("createStore(initial)", () => {
 
     // İlgisiz set() Map/Set örneklerini bozmamalı
     store.set({ sekme: "otobus" });
+    assert.equal(store.get().arac, arac);
+    assert.equal(store.get().aktifHatlar, aktifHatlar);
     assert.ok(store.get().arac instanceof Map);
     assert.ok(store.get().aktifHatlar instanceof Set);
     assert.equal(store.get().arac.get("18K/A001").kapino, "A001");
@@ -148,12 +165,17 @@ describe("createStore(initial)", () => {
     assert.deepEqual([...store.get().aktifHatlar], ["18K", "14BK"]);
 
     // Patch ile yeni Map/Set atanabilir
-    const nextMap = new Map();
+    const nextMap = new Map([["500T/C003", { kapino: "C003" }]]);
     const nextSet = new Set(["500T"]);
+    const observed = [];
+    store.subscribe((state) => observed.push({ arac: state.arac, aktifHatlar: state.aktifHatlar }));
     store.set({ arac: nextMap, aktifHatlar: nextSet });
     assert.equal(store.get().arac, nextMap);
     assert.equal(store.get().aktifHatlar, nextSet);
     assert.equal(store.get().aktifHatlar.has("500T"), true);
+    assert.equal(observed.length, 1);
+    assert.equal(observed[0].arac, nextMap);
+    assert.equal(observed[0].aktifHatlar, nextSet);
   });
 
   test("abone hatası diğer aboneleri durdurmamalı ve state güncellemesi tamamlanmalı", () => {
@@ -187,6 +209,20 @@ describe("createStore(initial)", () => {
       "first:2", "second:2", "third:2", "fourth:2",
     ]);
   });
+
+  test("hata veren abone kayıtlıyken diğer abone abonelikten çıkabilir", () => {
+    const store = createStore({ count: 0 });
+    const calls = [];
+    store.subscribe(() => { throw new Error("abone hatası"); });
+    const unsubscribe = store.subscribe((state) => calls.push(state.count));
+
+    assert.doesNotThrow(() => store.set({ count: 1 }));
+    unsubscribe();
+    assert.doesNotThrow(() => store.set({ count: 2 }));
+
+    assert.deepEqual(calls, [1]);
+    assert.equal(store.get().count, 2);
+  });
 });
 
 describe("createAppStore() varsayılanları", () => {
@@ -195,6 +231,8 @@ describe("createAppStore() varsayılanları", () => {
     const s = store.get();
 
     assert.equal(s.sekme, "yakin");
+    assert.equal(s.ben, null);
+    assert.equal(s.semt, null);
     assert.deepEqual(s.favoriler, ["18K", "14BK"]);
     assert.equal(s.theme, "system");
     assert.equal(s.mapStyle, "standart");
