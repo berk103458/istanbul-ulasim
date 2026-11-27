@@ -10,8 +10,13 @@ import { EtaEngine } from "../engines/etaEngine.js";
 import { NotificationEngine } from "../engines/notificationEngine.js";
 import { esc, bas, metre, saat, renkKod, metrobusMu } from "../map/mapController.js";
 import { otobusSatiriHTML } from "./nearbyView.js";
+import { accessibleBadgeStyle, bindKeyboardActivators } from "./a11y.js";
 
-const GUN_ADI = { I: "Hafta içi", C: "Cumartesi", P: "Pazar" };
+function dayLabel(code) {
+  if (code === "C") return t("bus.daySaturday");
+  if (code === "P") return t("bus.daySunday");
+  return t("bus.dayWeekday");
+}
 
 function formatHms(ms) {
   const d = new Date(ms);
@@ -25,6 +30,8 @@ function isWatched(hat, durakKod) {
 }
 
 export function createBusView(S, mc, callbacks) {
+  bindKeyboardActivators();
+
   async function renderList(p, ilk) {
     if (ilk) {
       callbacks.onYukle(t("bus.title"), false);
@@ -42,38 +49,39 @@ export function createBusView(S, mc, callbacks) {
       const k = String(d.hat || d.HATKODU || "").trim();
       if (!k) continue;
       if (!duyuruMap.has(k)) duyuruMap.set(k, []);
-      duyuruMap.get(k).push(d.mesaj || d.MESAJ || d.tip || "Duyuru");
+      duyuruMap.get(k).push(d.mesaj || d.MESAJ || d.tip || t("bus.alertDefault"));
     }
 
     let html = callbacks.baslikHTML(esc(t("bus.title")), false);
     html += `
       <div class="arama-kutu">
-        <span class="arama-ikon">${iconSvg("search", 17)}</span>
-        <input class="giris" id="ara" placeholder="${esc(t("bus.searchPlaceholder"))}" value="${esc(S.arama || "")}" autocomplete="off" autocapitalize="characters">
+        <span class="arama-ikon" aria-hidden="true">${iconSvg("search", 17)}</span>
+        <input type="search" class="giris" id="ara" aria-label="${esc(t("bus.searchLabel"))}" placeholder="${esc(t("bus.searchPlaceholder"))}" value="${esc(S.arama || "")}" autocomplete="off" autocapitalize="characters">
       </div>
-      <div class="cip-satir" aria-label="Otobüs Kategorileri">
-        <button class="cip ${kat === "tumu" ? "aktif" : ""}" data-bus-kat="tumu">${esc(t("bus.catAll"))}</button>
-        <button class="cip ${kat === "fav" ? "aktif" : ""}" data-bus-kat="fav">${iconSvg("starFill", 14)} ${esc(t("bus.catFav"))}</button>
-        <button class="cip ${kat === "mb" ? "aktif" : ""}" data-bus-kat="mb">${iconSvg("mb", 14)} ${esc(t("bus.catMb"))}</button>
-        <button class="cip ${kat === "duyuru" ? "aktif" : ""}" data-bus-kat="duyuru">${iconSvg("alert", 14)} ${esc(t("bus.catAnn"))} (${duyuruMap.size})</button>
+      <div class="cip-satir" role="group" aria-label="${esc(t("bus.categoriesAria"))}">
+        <button type="button" class="cip ${kat === "tumu" ? "aktif" : ""}" data-bus-kat="tumu" aria-pressed="${kat === "tumu" ? "true" : "false"}">${esc(t("bus.catAll"))}</button>
+        <button type="button" class="cip ${kat === "fav" ? "aktif" : ""}" data-bus-kat="fav" aria-pressed="${kat === "fav" ? "true" : "false"}">${iconSvg("starFill", 14)} ${esc(t("bus.catFav"))}</button>
+        <button type="button" class="cip ${kat === "mb" ? "aktif" : ""}" data-bus-kat="mb" aria-pressed="${kat === "mb" ? "true" : "false"}">${iconSvg("mb", 14)} ${esc(t("bus.catMb"))}</button>
+        <button type="button" class="cip ${kat === "duyuru" ? "aktif" : ""}" data-bus-kat="duyuru" aria-pressed="${kat === "duyuru" ? "true" : "false"}">${iconSvg("alert", 14)} ${esc(t("bus.catAnn"))} (${duyuruMap.size})</button>
       </div>`;
 
     const satir = (h) => {
       const fav = S.favoriler.includes(h.kod);
       const mb = metrobusMu(h);
       const dVar = duyuruMap.has(h.kod);
+      const favLabel = fav ? t("bus.favRemove", { hat: h.kod }) : t("bus.favAdd", { hat: h.kod });
       return `
-        <div class="kart satir tik" data-hat="${esc(h.kod)}">
+        <div class="kart satir tik" role="button" tabindex="0" data-hat="${esc(h.kod)}">
           <div class="kart-sol">
             <div class="bas">
-              <span class="rozet ${mb ? "mb" : "otobus"}" style="${mb ? "" : `background:${renkKod(h.kod)}`}">${iconSvg(mb ? "mb" : "otobus", 13)} ${esc(h.kod)}</span>
+              <span class="rozet ${mb ? "mb" : "otobus"}" style="${mb ? "" : accessibleBadgeStyle(renkKod(h.kod))}">${iconSvg(mb ? "mb" : "otobus", 13)} ${esc(h.kod)}</span>
               <span>${esc(bas(h.ad))}</span>
-              ${dVar ? `<span class="rozet" style="background:var(--uyari)">${iconSvg("alert", 12)}</span>` : ""}
+              ${dVar ? `<span class="rozet" style="${accessibleBadgeStyle("var(--uyari)")}" role="img" title="${esc(t("bus.hasAlert"))}" aria-label="${esc(t("bus.hasAlert"))}">${iconSvg("alert", 12)}</span>` : ""}
             </div>
-            <div class="alt">${mb ? "Metrobüs · " : ""}${h.km ? h.km.toFixed(1) + " km · " : ""}${h.dk ? Math.round(h.dk) + " dk" : ""}</div>
+            <div class="alt">${mb ? `${esc(t("bus.catMb"))} · ` : ""}${h.km ? h.km.toFixed(1) + " km · " : ""}${h.dk ? `${Math.round(h.dk)} ${esc(t("unit.minShort"))}` : ""}</div>
           </div>
           <div class="kart-sag">
-            <button class="btn ikon" data-fav="${esc(h.kod)}" aria-label="Favori" style="border:0;background:transparent;color:#f59e0b">${iconSvg(fav ? "starFill" : "star", 20)}</button>
+            <button type="button" class="btn ikon fav-btn" data-fav="${esc(h.kod)}" title="${esc(favLabel)}" aria-label="${esc(favLabel)}" aria-pressed="${fav ? "true" : "false"}">${iconSvg(fav ? "starFill" : "star", 20)}</button>
           </div>
         </div>`;
     };
@@ -83,28 +91,28 @@ export function createBusView(S, mc, callbacks) {
         .filter((h) => h.kod.startsWith(q))
         .concat(hatlar.filter((h) => !h.kod.startsWith(q) && (h.kod.includes(q) || h.ad.toLocaleUpperCase("tr").includes(q))))
         .slice(0, 40);
-      html += `<div class="baslik-satir"><h2>Sonuçlar</h2><span class="soluk">${bulunan.length} hat</span></div>`;
-      html += `<div class="liste">${bulunan.map(satir).join("") || `<div class="bos">Eşleşen hat bulunamadı.</div>`}</div>`;
+      html += `<div class="baslik-satir"><h2>${esc(t("bus.results"))}</h2><span class="soluk">${esc(t("nearby.linesCount", { n: bulunan.length }))}</span></div>`;
+      html += `<div class="liste">${bulunan.map(satir).join("") || `<div class="bos">${esc(t("bus.noMatch"))}</div>`}</div>`;
     } else if (kat === "duyuru") {
       const duyurulu = hatlar.filter((h) => duyuruMap.has(h.kod));
-      html += `<div class="baslik-satir"><h2>Aktif Duyurulu Hatlar</h2><span class="soluk">${duyurulu.length} hat</span></div>`;
-      html += `<div class="liste">${duyurulu.map(satir).join("") || `<div class="bos">Şu an aktif hat duyurusu yok.</div>`}</div>`;
+      html += `<div class="baslik-satir"><h2>${esc(t("bus.annLines"))}</h2><span class="soluk">${esc(t("nearby.linesCount", { n: duyurulu.length }))}</span></div>`;
+      html += `<div class="liste">${duyurulu.map(satir).join("") || `<div class="bos">${esc(t("bus.noAnn"))}</div>`}</div>`;
     } else if (kat === "mb") {
       const mb = hatlar.filter(metrobusMu).sort((a, b) => a.kod.localeCompare(b.kod, "tr"));
-      html += `<div class="baslik-satir"><h2>Metrobüs Hatları</h2><span class="soluk">${mb.length} hat</span></div>`;
+      html += `<div class="baslik-satir"><h2>${esc(t("bus.mbLines"))}</h2><span class="soluk">${esc(t("nearby.linesCount", { n: mb.length }))}</span></div>`;
       html += `<div class="liste">${mb.map(satir).join("")}</div>`;
     } else if (kat === "fav") {
       const favs = S.favoriler.map((k) => hatlar.find((h) => h.kod === k) || { kod: k, ad: "" });
-      html += `<div class="baslik-satir"><h2>Favoriler</h2><span class="soluk">${favs.length} hat</span></div>`;
-      html += `<div class="liste">${favs.map(satir).join("") || `<div class="bos">Hat arayıp yıldız ile ekleyin.</div>`}</div>`;
+      html += `<div class="baslik-satir"><h2>${esc(t("bus.favLines"))}</h2><span class="soluk">${esc(t("nearby.linesCount", { n: favs.length }))}</span></div>`;
+      html += `<div class="liste">${favs.map(satir).join("") || `<div class="bos">${esc(t("bus.noFavShort"))}</div>`}</div>`;
     } else {
       const favs = S.favoriler.map((k) => hatlar.find((h) => h.kod === k) || { kod: k, ad: "" });
-      html += `<div class="baslik-satir"><h2>Favoriler</h2></div>`;
-      html += `<div class="liste">${favs.map(satir).join("") || `<div class="bos">Hat arayıp yıldız ile ekleyin.</div>`}</div>`;
+      html += `<div class="baslik-satir"><h2>${esc(t("bus.favLines"))}</h2></div>`;
+      html += `<div class="liste">${favs.map(satir).join("") || `<div class="bos">${esc(t("bus.noFavShort"))}</div>`}</div>`;
       const mb = hatlar.filter(metrobusMu).sort((a, b) => a.kod.localeCompare(b.kod, "tr"));
-      html += `<div class="baslik-satir"><h2>Metrobüs Hatları</h2></div>`;
+      html += `<div class="baslik-satir"><h2>${esc(t("bus.mbLines"))}</h2></div>`;
       html += `<div class="liste">${mb.map(satir).join("")}</div>`;
-      html += `<p class="alt" style="margin-top:12px">Toplam ${hatlar.length} İETT hattı arasında arama yapabilirsiniz.</p>`;
+      html += `<p class="alt" style="margin-top:12px">${esc(t("bus.totalInfo", { n: hatlar.length }))}</p>`;
     }
 
     return html;
@@ -137,6 +145,7 @@ export function createBusView(S, mc, callbacks) {
     const liste = v.duraklar[p.yon] || [];
     const b = v.bilgi || {};
     const fav = S.favoriler.includes(hat);
+    const favLabel = fav ? t("bus.favRemove", { hat }) : t("bus.favAdd", { hat });
 
     if (ilk || p.cizilenYon !== p.yon) {
       mc.katman.clearLayers();
@@ -146,21 +155,22 @@ export function createBusView(S, mc, callbacks) {
     }
     mc.aracCiz(hat);
 
-    const favBtn = `<button class="btn ikon" data-fav="${esc(hat)}" aria-label="Favori" style="border:0;background:transparent;color:#f59e0b">${iconSvg(fav ? "starFill" : "star", 22)}</button>`;
+    const favBtn = `<button type="button" class="btn ikon fav-btn" data-fav="${esc(hat)}" title="${esc(favLabel)}" aria-label="${esc(favLabel)}" aria-pressed="${fav ? "true" : "false"}">${iconSvg(fav ? "starFill" : "star", 22)}</button>`;
     let html = callbacks.baslikHTML(
-      `<span class="rozet" style="background:${esc(v.renk)}">${iconSvg(v.mb ? "mb" : "otobus", 14)} ${esc(hat)}</span> <span style="font-size:15px">${esc(bas(b.ad || ""))}</span>`,
+      `<span class="rozet" style="${accessibleBadgeStyle(v.renk)}">${iconSvg(v.mb ? "mb" : "otobus", 14)} ${esc(hat)}</span> <span style="font-size:15px">${esc(bas(b.ad || ""))}</span>`,
       true,
       favBtn
     );
 
     html += `<div class="alt" style="margin-bottom:8px">${[
       b.km ? b.km.toFixed(1) + " km" : "",
-      b.dk ? "sefer " + Math.round(b.dk) + " dk" : "",
+      b.dk ? t("bus.tripDuration", { n: Math.round(b.dk) }) : "",
       b.tarife ? bas(b.tarife) : "",
-      (v.otobusler || []).length + " araç seferde",
+      t("bus.inService", { n: (v.otobusler || []).length }),
     ]
       .filter(Boolean)
-      .join(" · ")} <span class="canli">CANLI</span></div>`;
+      .map(esc)
+      .join(" · ")} <span class="canli">${esc(t("common.live"))}</span></div>`;
 
     // Announcements banner
     for (const d of hatDuyurular || []) {
@@ -171,10 +181,11 @@ export function createBusView(S, mc, callbacks) {
     }
 
     // Direction switcher
-    html += `<div class="segment">${yonler
+    html += `<div class="segment" role="group">${yonler
       .map((y) => {
         const l = v.duraklar[y];
-        return `<button data-yon="${esc(y)}" class="${y === p.yon ? "aktif" : ""}">→ ${esc(bas(l[l.length - 1].ad))}</button>`;
+        const active = y === p.yon;
+        return `<button type="button" data-yon="${esc(y)}" class="${active ? "aktif" : ""}" aria-pressed="${active ? "true" : "false"}">→ ${esc(bas(l[l.length - 1].ad))}</button>`;
       })
       .join("")}</div>`;
 
@@ -188,12 +199,12 @@ export function createBusView(S, mc, callbacks) {
         <div class="kart" style="margin-bottom:10px">
           <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
             <div class="alt">${esc(h.secili ? t("nearby.myStop") : t("nearby.nearestStop"))}: <b style="color:var(--yazi)">${esc(bas(h.d.ad))}</b>${h.metre != null ? " · " + metre(h.metre) : ""}</div>
-            <button class="btn kucuk ${watched ? "birincil" : ""}" data-bildir-hat="${esc(hat)}" data-bildir-durak="${esc(h.d.kod)}" data-bildir-ad="${esc(bas(h.d.ad))}" data-bildir-yon="${esc(p.yon)}">🔔 ${esc(watched ? t("eta.notifying") : t("eta.notify3m"))}</button>
+            <button type="button" class="btn kucuk ${watched ? "birincil" : ""}" data-bildir-hat="${esc(hat)}" data-bildir-durak="${esc(h.d.kod)}" data-bildir-ad="${esc(bas(h.d.ad))}" data-bildir-yon="${esc(p.yon)}" aria-pressed="${watched ? "true" : "false"}">🔔 ${esc(watched ? t("eta.notifying") : t("eta.notify3m"))}</button>
           </div>
           <div class="liste" style="margin-top:6px">${gel.length ? gel.map((x) => otobusSatiriHTML(hat, x)).join("") : `<div class="alt">${esc(t("nearby.noApproaching"))}</div>`}</div>
         </div>`;
     } else {
-      html += `<div class="alt" style="margin-bottom:8px">Durağınızı seçmek için listeden veya haritadan bir durağa dokunun.</div>`;
+      html += `<div class="alt" style="margin-bottom:8px">${esc(t("bus.pickStopHint"))}</div>`;
     }
 
     // Timetable
@@ -203,25 +214,28 @@ export function createBusView(S, mc, callbacks) {
     const simdi = Zaman.simdi();
     const sonraki = bugun ? saatler.find((s) => Zaman.dk(s) >= simdi) : null;
 
-    html += `<div class="baslik-satir"><h2>Sefer Saatleri</h2><span class="soluk">${esc(bas(liste[0]?.ad || ""))} kalkış</span></div>`;
-    html += `<div class="segment">${["I", "C", "P"]
-      .map((g) => `<button data-gun="${g}" class="${g === p.gun ? "aktif" : ""}">${GUN_ADI[g]}${g === Zaman.gunTipi() ? " •" : ""}</button>`)
+    html += `<div class="baslik-satir"><h2>${esc(t("bus.timetable"))}</h2><span class="soluk">${esc(t("bus.departureFrom", { ad: bas(liste[0]?.ad || "") }))}</span></div>`;
+    html += `<div class="segment" role="group">${["I", "C", "P"]
+      .map((g) => {
+        const active = g === p.gun;
+        return `<button type="button" data-gun="${g}" class="${active ? "aktif" : ""}" aria-pressed="${active ? "true" : "false"}">${esc(dayLabel(g))}${g === Zaman.gunTipi() ? " •" : ""}</button>`;
+      })
       .join("")}</div>`;
 
     html += `<div class="kart" style="margin-bottom:12px">`;
     if (saatler.length) {
       if (sonraki) {
-        html += `<div class="alt">Sıradaki kalkış <b style="color:var(--yazi)">${esc(sonraki)}</b> · ${Zaman.kalanYazi(Zaman.kalan(sonraki))} sonra</div>`;
+        html += `<div class="alt">${esc(t("bus.nextDep"))} <b style="color:var(--yazi)">${esc(sonraki)}</b> · ${Zaman.kalanYazi(Zaman.kalan(sonraki))} ${esc(t("bus.later"))}</div>`;
       }
       html += `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">${saatler
         .map((s) => {
           const gecti = bugun && Zaman.dk(s) < simdi;
           const isNext = s === sonraki;
-          return `<span class="sure ${isNext ? "" : "tarife"}" style="${gecti ? "opacity:.35" : ""}">${esc(s)}</span>`;
+          return `<span class="sure ${isNext ? "" : "tarife"}" style="${gecti ? "opacity:.45" : ""}">${esc(s)}</span>`;
         })
         .join("")}</div>`;
     } else {
-      html += `<div class="alt">Bu gün için planlanmış sefer bilgisi yok.</div>`;
+      html += `<div class="alt">${esc(t("bus.noSchedule"))}</div>`;
     }
     html += `</div>`;
 
@@ -233,34 +247,35 @@ export function createBusView(S, mc, callbacks) {
       if (a.hat !== hat || a.yon !== p.yon) continue;
       const yer = mc.aracYeri(liste, a);
       if (!yer) continue;
-      const t = h && h.i >= yer.sonraki ? Core.varisTahmini(liste, a.gor, h.i, mc.aracHizi(hat, a.kapino) || hiz0) : null;
-      const kayit = { a, yer, t };
+      const tEst = h && h.i >= yer.sonraki ? Core.varisTahmini(liste, a.gor, h.i, mc.aracHizi(hat, a.kapino) || hiz0) : null;
+      const kayit = { a, yer, t: tEst };
       if (yer.durakta != null) (durakta[yer.durakta] ||= []).push(kayit);
       else (arada[yer.sonraki] ||= []).push(kayit);
     }
 
-    const kalanYazi = (k) => (k.t ? ` · <b>${k.t.dakika <= 1 ? "geliyor" : "~" + k.t.dakika + " dk"}</b>` : "");
+    const kalanYazi = (k) =>
+      k.t ? ` · <b>${esc(k.t.dakika <= 1 ? t("eta.arriving") : t("eta.min", { n: k.t.dakika }))}</b>` : "";
     let lis = "";
     liste.forEach((d, i) => {
       for (const k of (arada[i] || []).sort((x, y) => y.yer.oran - x.yer.oran)) {
         lis += `
-          <li class="tik" data-arac="${esc(k.a.kapino)}" style="padding-left:8px">
-            <span class="arac-cip" style="background:${esc(v.renk)}">${iconSvg(v.mb ? "mb" : "otobus", 12)} ${esc(k.a.kapino)}</span>
-            <span class="alt">${esc(bas(d.ad))} durağına ${metre(k.yer.metre)}${kalanYazi(k)}</span>
+          <li class="tik" role="button" tabindex="0" data-arac="${esc(k.a.kapino)}" style="padding-left:8px">
+            <span class="arac-cip" style="${accessibleBadgeStyle(v.renk)}">${iconSvg(v.mb ? "mb" : "otobus", 12)} ${esc(k.a.kapino)}</span>
+            <span class="alt">${esc(t("bus.toStopDist", { ad: bas(d.ad), m: metre(k.yer.metre) }))}${kalanYazi(k)}</span>
           </li>`;
       }
       const bu = durakta[i] || [];
       lis += `
-        <li data-durak="${i}" class="tik ${h && h.i === i ? "aktif" : ""}">
+        <li data-durak="${i}" role="button" tabindex="0" class="tik ${h && h.i === i ? "aktif" : ""}">
           <span>${esc(bas(d.ad))}</span>
           <span style="display:flex;align-items:center;gap:6px">
-            ${bu.map((k) => `<span class="arac-cip" data-arac="${esc(k.a.kapino)}" style="background:${esc(v.renk)}">${iconSvg(v.mb ? "mb" : "otobus", 12)} ${esc(k.a.kapino)}</span>`).join("")}
+            ${bu.map((k) => `<button type="button" class="arac-cip" data-arac="${esc(k.a.kapino)}" style="border:0;cursor:pointer;${accessibleBadgeStyle(v.renk)}">${iconSvg(v.mb ? "mb" : "otobus", 12)} ${esc(k.a.kapino)}</button>`).join("")}
           </span>
         </li>`;
     });
 
     const toplam = Object.values(durakta).flat().length + Object.values(arada).flat().length;
-    html += `<div class="baslik-satir"><h2>Duraklar (${liste.length})</h2><span class="soluk">${toplam} araç bu yönde</span></div>`;
+    html += `<div class="baslik-satir"><h2>${esc(t("bus.stops", { n: liste.length }))}</h2><span class="soluk">${esc(t("bus.vehiclesOnDir", { n: toplam }))}</span></div>`;
     html += `<div class="kart"><ol class="duraklar">${lis}</ol></div>`;
     return html;
   }
@@ -303,7 +318,7 @@ export function createBusView(S, mc, callbacks) {
     }
 
     const baslik = callbacks.baslikHTML(
-      `<span class="rozet" style="background:${esc(v.renk)}">${iconSvg(v.mb ? "mb" : "otobus", 14)} ${esc(p.hat)}</span> <span style="font-size:15px">Araç ${esc(p.kapino)}</span>`,
+      `<span class="rozet" style="${accessibleBadgeStyle(v.renk)}">${iconSvg(v.mb ? "mb" : "otobus", 14)} ${esc(p.hat)}</span> <span style="font-size:15px">${esc(t("bus.vehicleLabel", { id: p.kapino }))}</span>`,
       true
     );
 
@@ -349,7 +364,7 @@ export function createBusView(S, mc, callbacks) {
     let kart = `<div class="kart">`;
     if (liste.length) kart += `<div class="bas" style="justify-content:space-between"><span>→ ${esc(bas(liste[liste.length - 1].ad))}</span><span style="display:flex;gap:4px">${badges.join("")}</span></div>`;
     if (v.bilgi?.ad) kart += `<div class="alt">${esc(bas(v.bilgi.ad))}</div>`;
-    kart += `<div class="alt">${esc(t("eta.lastUpdate"))}: <b style="color:var(--yazi)">${esc(hms)}</b> · <span data-live-age="${a.gercek.ms}">${esc(yasStr)}</span>${a.hiz != null ? ` · ~${Math.round(a.hiz)} km/sa` : ""}</div>`;
+    kart += `<div class="alt">${esc(t("eta.lastUpdate"))}: <b style="color:var(--yazi)">${esc(hms)}</b> · <span data-live-age="${a.gercek.ms}">${esc(yasStr)}</span>${a.hiz != null ? ` · ~${Math.round(a.hiz)} ${esc(t("unit.kmh"))}` : ""}</div>`;
     if (plaka || operator) {
       kart += `<div class="alt">${plaka ? `${esc(t("eta.plate"))}: <b style="color:var(--yazi)">${esc(plaka)}</b>` : ""}${plaka && operator ? " · " : ""}${operator ? `${esc(t("eta.operator"))}: <b style="color:var(--yazi)">${esc(operator)}</b>` : ""}</div>`;
     }
@@ -357,12 +372,12 @@ export function createBusView(S, mc, callbacks) {
     const yer = liste.length ? mc.aracYeri(liste, a) : null;
     if (yer) {
       kart += `<div class="kart" style="background:var(--kart-2);margin:6px 0">
-        <div class="alt">${iconSvg("konum", 14)} <b style="color:var(--yazi)">Şu an:</b> ${
+        <div class="alt">${iconSvg("konum", 14)} <b style="color:var(--yazi)">${esc(t("bus.nowAt"))}</b> ${
         yer.durakta != null
-          ? `<b>${esc(bas(liste[yer.durakta].ad))}</b> durağında`
+          ? esc(t("bus.atStop", { ad: bas(liste[yer.durakta].ad) }))
           : yer.sonraki > 0
           ? `<b>${esc(bas(liste[yer.sonraki - 1].ad))}</b> → <b>${esc(bas(liste[yer.sonraki].ad))}</b> (${metre(yer.metre)})`
-          : `<b>${esc(bas(liste[0].ad))}</b> durağına ${metre(yer.metre)}`
+          : esc(t("bus.toStopDist", { ad: bas(liste[0].ad), m: metre(yer.metre) }))
       }</div></div>`;
     }
 
@@ -373,24 +388,24 @@ export function createBusView(S, mc, callbacks) {
       const factors = tEta?.factors || {};
       const speedVal = factors.speedKmh ?? Math.round(hiz);
       const trafficFactor = factors.trafficMultiplier != null ? `×${Number(factors.trafficMultiplier).toFixed(2)}` : ti != null ? `%${Math.round(ti)}` : "–";
-      const dwellMin = factors.dwellMin != null ? `${Number(factors.dwellMin).toFixed(1)} dk` : "–";
+      const dwellMin = factors.dwellMin != null ? `${Number(factors.dwellMin).toFixed(1)} ${t("unit.minShort")}` : "–";
       const hasIncident = Boolean(tEta?.incidentWarning || factors.incidentPenaltyMin > 0);
 
       kart += `<div class="kart" style="background:var(--vurgu-yumusak)">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
           <div class="alt">${esc(hd.secili ? t("nearby.myStop") : t("nearby.nearestStop"))} (${esc(bas(hd.d.ad))})</div>
-          <button class="btn kucuk ${watched ? "birincil" : ""}" data-bildir-hat="${esc(p.hat)}" data-bildir-durak="${esc(hd.d.kod)}" data-bildir-ad="${esc(bas(hd.d.ad))}" data-bildir-yon="${esc(a.yon)}">🔔 ${esc(watched ? t("eta.notifying") : t("eta.notify3m"))}</button>
+          <button type="button" class="btn kucuk ${watched ? "birincil" : ""}" data-bildir-hat="${esc(p.hat)}" data-bildir-durak="${esc(hd.d.kod)}" data-bildir-ad="${esc(bas(hd.d.ad))}" data-bildir-yon="${esc(a.yon)}" aria-pressed="${watched ? "true" : "false"}">🔔 ${esc(watched ? t("eta.notifying") : t("eta.notify3m"))}</button>
         </div>
         ${
           tEta
-            ? `<div class="bas" style="color:var(--vurgu);font-size:20px" data-live-eta="${esc(key)}">${tEta.dakika <= 1 ? esc(t("eta.arriving")) : `~${tEta.dakika} dk`} <span class="alt">${esc(t("eta.stopsAway", { n: tEta.durakSayisi }))} · ${metre(tEta.metre)} · ${saat(simdi + tEta.dakika)}</span></div>
+            ? `<div class="bas" style="color:var(--vurgu);font-size:20px" data-live-eta="${esc(key)}">${esc(tEta.dakika <= 1 ? t("eta.arriving") : t("eta.min", { n: tEta.dakika }))} <span class="alt">${esc(t("eta.stopsAway", { n: tEta.durakSayisi }))} · ${metre(tEta.metre)} · ${saat(simdi + tEta.dakika)}</span></div>
                <div class="alt" style="margin-top:4px;gap:8px;flex-wrap:wrap">
-                 <span>${esc(t("eta.speed"))}: <b>${esc(speedVal)} km/sa</b></span>
+                 <span>${esc(t("eta.speed"))}: <b>${esc(speedVal)} ${esc(t("unit.kmh"))}</b></span>
                  <span>· ${esc(t("eta.trafficImpact"))}: <b>${esc(trafficFactor)}</b></span>
                  <span>· ${esc(t("eta.stopDwell"))}: <b>${esc(dwellMin)}</b></span>
                  ${hasIncident ? `<span class="durum-rozet uyari">${iconSvg("alert", 12)} ${esc(t("eta.incidentWarn"))}</span>` : ""}
                </div>`
-            : `<div class="alt">Durağınızı geçti</div>`
+            : `<div class="alt">${esc(t("bus.passedStop"))}</div>`
         }
       </div>`;
     }
@@ -399,23 +414,24 @@ export function createBusView(S, mc, callbacks) {
       const son = liste.length - 1;
       const satirlar = [];
       for (let i = s; i <= son && satirlar.length < 5; i++) {
-        const t = tah(i);
-        if (t) {
-          satirlar.push(`<div class="alt" style="justify-content:space-between;width:100%"><span>${esc(bas(liste[i].ad))}</span><b style="color:var(--yazi)">${saat(simdi + t.dakika)}</b></div>`);
+        const tNext = tah(i);
+        if (tNext) {
+          satirlar.push(`<div class="alt" style="justify-content:space-between;width:100%"><span>${esc(bas(liste[i].ad))}</span><b style="color:var(--yazi)">${saat(simdi + tNext.dakika)}</b></div>`);
         }
       }
       const yuzde = Math.round((s / Math.max(1, son)) * 100);
       kart += `
-        <div class="baslik-satir" style="margin:6px 0 4px"><h3>Sıradaki Duraklar</h3><span class="soluk">${son - s + 1} kaldı</span></div>
+        <div class="baslik-satir" style="margin:6px 0 4px"><h3>${esc(t("bus.nextStops"))}</h3><span class="soluk">${esc(t("bus.remaining", { n: son - s + 1 }))}</span></div>
         ${satirlar.join("")}
         <div class="doluluk-bar"><span style="width:${yuzde}%;background:${esc(v.renk)}"></span></div>
         <div class="alt" style="justify-content:space-between"><span>${esc(bas(liste[0].ad))}</span><span>%${yuzde}</span></div>`;
     }
 
+    const tracking = mc.getTakipArac() === key;
     kart += `
       <div style="display:flex;gap:8px;margin-top:10px">
-        <button class="btn" style="flex:1" data-ak="takip">${mc.getTakipArac() === key ? "✓ Takip ediliyor" : "Haritada takip et"}</button>
-        <button class="btn birincil" style="flex:1" data-ak="hat" data-akhat="${esc(p.hat)}" data-akyon="${esc(a.yon)}">Hat sayfası ›</button>
+        <button type="button" class="btn" style="flex:1" data-ak="takip" aria-pressed="${tracking ? "true" : "false"}">${esc(tracking ? t("bus.following") : t("bus.followMap"))}</button>
+        <button type="button" class="btn birincil" style="flex:1" data-ak="hat" data-akhat="${esc(p.hat)}" data-akyon="${esc(a.yon)}">${esc(t("bus.linePage"))}</button>
       </div>
     </div>`;
 

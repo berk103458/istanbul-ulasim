@@ -151,7 +151,7 @@
   padding: 0 6px;
   border-radius: 9px;
   background: var(--iyi);
-  color: #ffffff;
+  color: var(--pin-yazi);
   border: 2px solid #ffffff;
   box-shadow: 0 3px 10px rgba(15, 23, 42, 0.28);
   display: inline-flex;
@@ -195,4 +195,11 @@
 
 .uzak .durak-etiket {
   display: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .arac .halka,
+  .ben-ikon::after {
+    animation: none !important;
+  }
 }
