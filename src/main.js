@@ -8,41 +8,26 @@ import "./styles/layout.css";
 import "./styles/components.css";
 import "./styles/map.css";
 
-import { App } from "@capacitor/app";
 import { KV } from "./core/storage.js";
 import { Bridge } from "./core/bridge.js";
-import { API } from "./core/api.js";
 import { iconSvg } from "./ui/icons.js";
 import { initLang, t } from "./i18n/index.js";
-import { DataProvider } from "./engines/dataProvider.js";
-import { NotificationEngine } from "./engines/notificationEngine.js";
 import { createMapController, esc, hataMesaji } from "./map/mapController.js";
-import { createAppStore, restorePreferences } from "./state/store.js";
+import { createAppStore } from "./state/store.js";
 import { createNearbyView, HIZLI_SEMTLER } from "./views/nearbyView.js";
 
-const CANLI_SN = 5;
+import { createBottomSheet } from "./app/bottomSheet.js";
+import { createLiveUpdates } from "./app/liveUpdates.js";
+import { ensureToastContainer, toggleStopWatch } from "./app/notifications.js";
+import { bindPlatformEvents } from "./app/platformEvents.js";
+import { createPwaInstall } from "./app/pwa.js";
+import { createSettings } from "./app/settings.js";
 
 const store = createAppStore();
 const S = store.get();
 
 let cizimNo = 0;
-let panelZamanlayici = null;
 let nearbyCache = [];
-let deferredInstallPrompt = null;
-
-// ---------------- Toast Container for NotificationEngine ----------------
-function ensureToastContainer() {
-  if (typeof document === "undefined") return null;
-  let el = document.querySelector("#toastKutu");
-  if (!el) {
-    el = document.createElement("div");
-    el.id = "toastKutu";
-    el.className = "toast-kutu";
-    el.setAttribute("aria-live", "polite");
-    document.body.appendChild(el);
-  }
-  return el;
-}
 
 // ---------------- Lazy-Loaded View & Modal Loaders ----------------
 let modalInstance = null;
@@ -139,85 +124,13 @@ function onYukle(b, g) {
     `<div class="skeleton skeleton-kart"></div><div class="skeleton skeleton-kart"></div><div class="skeleton skeleton-satir"></div>`;
 }
 
-function surgicalLiveUpdate() {
-  const ic = document.querySelector("#icerik");
-  if (!ic) return false;
-
-  // Update live age counters in-place
-  ic.querySelectorAll("[data-live-age]").forEach((el) => {
-    const ms = Number(el.dataset.liveAge);
-    if (!isFinite(ms) || ms <= 0) return;
-    const yas = Math.max(0, Math.round((Date.now() - ms) / 1000));
-    el.textContent = yas < 90 ? t("eta.secAgo", { n: yas }) : t("eta.minAgo", { n: Math.round(yas / 60) });
-  });
-
-  // Update live ETA elements in-place when order/count hasn't changed
-  const etaEls = ic.querySelectorAll("[data-live-eta]");
-  if (!etaEls.length) return false;
-
-  let anyMismatch = false;
-  const p = sayfa();
-
-  etaEls.forEach((el) => {
-    const key = el.dataset.liveEta;
-    const [hat, kapino] = String(key || "").split("/");
-    const a = S.arac.get(key);
-    if (!a || !hat || !kapino) {
-      anyMismatch = true;
-      return;
-    }
-    const hd = mc.hedefDurak(hat, a.yon);
-    if (!hd) return;
-    const list = mc.yaklasanOtobusler(hat, a.yon, hd.i);
-    const match = list.find((x) => x.bus.kapino === kapino);
-    if (!match) {
-      anyMismatch = true;
-      return;
-    }
-    const dk = Math.round(match.t.dakika);
-    const sureSpan = el.querySelector(".sure") || (el.classList.contains("sure") ? el : null);
-    if (sureSpan) {
-      sureSpan.classList.toggle("yakin", dk <= 3);
-      sureSpan.textContent = dk <= 1 ? t("eta.arriving") : `~${dk} dk`;
-    }
-  });
-
-  if (typeof NotificationEngine?.checkUpdates === "function") {
-    NotificationEngine.checkUpdates(S, mc).catch(() => {});
-  }
-
-  return !anyMismatch && p.tur !== "hat";
-}
-
-function panelYenile() {
-  if (surgicalLiveUpdate()) return;
-  clearTimeout(panelZamanlayici);
-  panelZamanlayici = setTimeout(() => ciz(false), 120);
-}
-
-// ---------------- Bottom Sheet Physics ----------------
-const panelEl = () => document.querySelector("#panel");
-
-function panelKonum() {
-  const b = document.body.classList;
-  return b.contains("tam") ? "tam" : b.contains("genis") ? "genis" : "normal";
-}
-
-function panelAyarla(k) {
-  document.body.classList.toggle("tam", k === "tam");
-  document.body.classList.toggle("genis", k === "genis");
-  const p = panelEl();
-  if (k === "tam" && p) p.scrollTop = 0;
-  setTimeout(() => mc.map.invalidateSize({ pan: false }), 300);
-}
-
 // ---------------- Controllers & Eager Nearby View ----------------
 const callbacks = {
   sayfa,
   getCizimNo: () => cizimNo,
   baslikHTML,
   onYukle,
-  panelYenile,
+  panelYenile: () => panelYenile(),
   syncNav,
   ciz: (degisti) => ciz(degisti),
   git: (s) => git(s),
@@ -235,6 +148,13 @@ const callbacks = {
 
 const mc = createMapController(S, callbacks);
 const nearbyView = createNearbyView(S, mc, callbacks);
+const bottomSheet = createBottomSheet(mc);
+const { panelKonum, panelAyarla } = bottomSheet;
+const liveUpdates = createLiveUpdates(S, mc, { sayfa, ciz });
+const { panelYenile } = liveUpdates;
+const pwaInstall = createPwaInstall(S, { sayfa, panelYenile });
+const settings = createSettings(store, mc);
+const { applyTheme } = settings;
 
 function git(s) {
   S.yigin.push(s);
@@ -304,19 +224,7 @@ async function ciz(sayfaDegisti = false) {
     const id = aktif && aktif.id;
     const pos = aktif && aktif.selectionStart;
 
-    let installBanner = "";
-    if (deferredInstallPrompt && S.sekme === "yakin" && !S.yigin.length) {
-      installBanner = `
-        <div class="duyuru bilgi" id="pwaBanner" style="justify-content:space-between;align-items:center">
-          <span>${esc(t("common.installBanner"))}</span>
-          <span style="display:flex;gap:6px">
-            <button class="btn kucuk birincil" id="pwaKurBtn">${esc(t("common.installBtn"))}</button>
-            <button class="btn kucuk" id="pwaKapatBtn">×</button>
-          </span>
-        </div>`;
-    }
-
-    ic.innerHTML = installBanner + html;
+    ic.innerHTML = pwaInstall.renderBanner() + html;
 
     if (id) {
       const el = document.getElementById(id);
@@ -338,45 +246,9 @@ async function ciz(sayfaDegisti = false) {
   }
 }
 
-// ---------------- Theme ----------------
-function applyTheme(theme) {
-  S.theme = theme || "system";
-  KV.set("theme", S.theme);
-  if (S.theme === "light" || S.theme === "dark") {
-    document.documentElement.dataset.theme = S.theme;
-  } else {
-    delete document.documentElement.dataset.theme;
-  }
-  mc.updateBaseLayer();
-}
-
-window.matchMedia?.("(prefers-color-scheme: dark)").addEventListener("change", () => {
-  if (S.theme === "system") mc.updateBaseLayer();
-});
+settings.bind();
 
 // ---------------- Map Floating Controls ----------------
-document.querySelector("#trafikBtn")?.addEventListener("click", () => {
-  S.trafik = !S.trafik;
-  document.querySelector("#trafikBtn")?.classList.toggle("aktif", S.trafik);
-  KV.set("trafik", S.trafik);
-  if (S.trafik) mc.trafikYukle();
-  else {
-    mc.trafikKatmani.clearLayers();
-    mc.trafikBilgiYaz();
-  }
-});
-
-document.querySelector("#isparkBtn")?.addEventListener("click", () => {
-  S.ispark = !S.ispark;
-  document.querySelector("#isparkBtn")?.classList.toggle("aktif", S.ispark);
-  KV.set("ispark", S.ispark);
-  if (S.ispark) mc.isparkYukle();
-  else {
-    mc.isparkKatmani.clearLayers();
-    mc.isparkBilgiYaz();
-  }
-});
-
 document.querySelector("#katmanBtn")?.addEventListener("click", async () => {
   (await getModal()).openSettings();
 });
@@ -400,18 +272,8 @@ document.querySelector("#secimIptal")?.addEventListener("click", (e) => {
 
 // ---------------- Delegated Click & Input Events ----------------
 document.addEventListener("click", async (e) => {
-  if (e.target.closest("#pwaKurBtn") && deferredInstallPrompt) {
-    deferredInstallPrompt.prompt();
-    await deferredInstallPrompt.userChoice.catch(() => {});
-    deferredInstallPrompt = null;
-    document.querySelector("#pwaBanner")?.remove();
-    return;
-  }
-  if (e.target.closest("#pwaKapatBtn")) {
-    deferredInstallPrompt = null;
-    document.querySelector("#pwaBanner")?.remove();
-    return;
-  }
+  const installAction = pwaInstall.handleClick(e.target);
+  if (installAction) return installAction;
 
   const ar = e.target.closest("[data-arac]");
   if (ar && sayfa().tur === "hat") {
@@ -572,18 +434,7 @@ document.addEventListener("click", async (e) => {
     return ciz(false);
   }
   if (d.bildirHat) {
-    const hat = d.bildirHat;
-    const durakKod = d.bildirDurak;
-    const durakAd = d.bildirAd || durakKod;
-    const yon = d.bildirYon || "";
-    const watches = typeof NotificationEngine?.getWatches === "function" ? NotificationEngine.getWatches() : [];
-    const existing = watches.find((w) => w.hat === hat && w.durakKod === durakKod);
-    if (existing) {
-      NotificationEngine.unwatch?.(existing.id || `${hat}|${durakKod}`);
-    } else {
-      NotificationEngine.watchStopBus?.({ hat, durakKod, durakAd, yon, thresholdMin: 3 });
-      NotificationEngine.notifyToast?.(`🔔 ${hat} → ${durakAd} (${t("eta.notify3m")})`);
-    }
+    toggleStopWatch(d);
     return ciz(false);
   }
   if (d.semt) {
@@ -666,186 +517,23 @@ document.addEventListener("input", async (e) => {
   }
 });
 
-// ---------------- Bottom Sheet Touch Drag ----------------
-(() => {
-  const panel = panelEl();
-  if (!panel) return;
-  let y0 = null, x0 = 0, dy = 0, bastan = false, surukle = false, iptal = false, k0 = "normal", ust0 = true;
-
-  panel.addEventListener(
-    "touchstart",
-    (e) => {
-      const touch = e.touches[0];
-      y0 = touch.clientY;
-      x0 = touch.clientX;
-      dy = 0;
-      surukle = false;
-      iptal = false;
-      k0 = panelKonum();
-      const ic = document.querySelector("#icerik");
-      ust0 = !ic || ic.scrollTop <= 0;
-      const ust = touch.clientY - panel.getBoundingClientRect().top < 56;
-      bastan = Boolean(e.target.closest("#tutamak")) || k0 === "tam" || (ust && !e.target.closest("input,select,textarea,button"));
-    },
-    { passive: true }
-  );
-
-  panel.addEventListener(
-    "touchmove",
-    (e) => {
-      if (y0 == null || iptal) return;
-      const touch = e.touches[0];
-      dy = touch.clientY - y0;
-      if (!surukle && Math.abs(touch.clientX - x0) > Math.abs(dy) + 6) {
-        iptal = true;
-        return;
-      }
-      const izin = surukle || bastan || (dy > 0 && ust0);
-      if (!izin || Math.abs(dy) < 6) return;
-      if (k0 === "genis" && dy < 0 && !bastan) return;
-      if (k0 === "tam" && dy > 0) return;
-      surukle = true;
-      e.preventDefault();
-      panel.classList.add("suruk");
-      const sin =
-        k0 === "tam"
-          ? [-window.innerHeight * 0.8, 0]
-          : k0 === "genis"
-          ? [0, window.innerHeight * 0.8]
-          : [-window.innerHeight * 0.3, window.innerHeight * 0.5];
-      panel.style.transform = `translateY(${Math.max(sin[0], Math.min(sin[1], dy))}px)`;
-    },
-    { passive: false }
-  );
-
-  const bitir = () => {
-    panel.classList.remove("suruk");
-    panel.style.transform = "";
-    if (surukle) {
-      const H = window.innerHeight;
-      let k = k0;
-      if (k0 === "normal") k = dy > 70 ? "tam" : dy < -60 ? "genis" : "normal";
-      else if (k0 === "genis") k = dy > H * 0.45 ? "tam" : dy > 60 ? "normal" : "genis";
-      else if (k0 === "tam") k = dy < -H * 0.5 ? "genis" : dy < -40 ? "normal" : "tam";
-      if (k !== k0) panelAyarla(k);
-    }
-    y0 = null;
-    surukle = false;
-  };
-
-  panel.addEventListener("touchend", bitir);
-  panel.addEventListener("touchcancel", bitir);
-  panel.addEventListener(
-    "click",
-    (e) => {
-      const k = panelKonum();
-      if (k === "tam") {
-        e.stopPropagation();
-        e.preventDefault();
-        panelAyarla("normal");
-        return;
-      }
-      if (e.target.closest("#tutamak")) {
-        panelAyarla(k === "genis" ? "normal" : "genis");
-      }
-    },
-    true
-  );
-})();
-
-// ---------------- History & Capacitor Back Button ----------------
-window.addEventListener("popstate", () => {
-  if (modalInstance?.isOpen()) {
-    modalInstance.close();
-    return;
-  }
-  if (S.yigin.length) {
-    geri(true);
-  }
+bottomSheet.bind();
+bindPlatformEvents({
+  getModalInstance: () => modalInstance,
+  hasHistory: () => S.yigin.length > 0,
+  geri,
+  panelKonum,
+  panelAyarla,
 });
-
-App.addListener("backButton", () => {
-  if (modalInstance?.isOpen()) {
-    modalInstance.close();
-    return;
-  }
-  if (panelKonum() === "genis") {
-    panelAyarla("normal");
-    return;
-  }
-  if (S.yigin.length) {
-    geri(true);
-    return;
-  }
-  App.exitApp();
-}).catch(() => {});
-
-// ---------------- PWA Service Worker & Install Prompt ----------------
-if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
-  navigator.serviceWorker.register("/sw.js").catch(() => {});
-}
-
-window.addEventListener("beforeinstallprompt", (e) => {
-  e.preventDefault();
-  deferredInstallPrompt = e;
-  if (sayfa().tur === "yakin") panelYenile();
-});
-
-// ---------------- Periodic Loops ----------------
-setInterval(() => mc.canliTur(), CANLI_SN * 1000);
-setInterval(() => {
-  if (!document.hidden) {
-    mc.oluHesap();
-    mc.tahminiCiz();
-    surgicalLiveUpdate();
-  }
-}, 1000);
-setInterval(() => {
-  if (!document.hidden) {
-    if (S.trafik) mc.trafikYukle(true);
-    if (S.ispark) mc.isparkYukle(true);
-    if (S.filoRadar) mc.filoRadarYukle(true);
-  }
-}, 120e3);
-setInterval(() => {
-  const p = sayfa();
-  if (!document.hidden && (p.tur === "ist" || p.tur === "yakin")) ciz(false);
-}, 60e3);
-
+pwaInstall.bind();
+liveUpdates.startTimers();
 // ---------------- Bootstrap ----------------
 async function bootstrap() {
   initLang();
   ensureToastContainer();
 
-  const { trafik, ispark } = await restorePreferences(store);
-  if (S.proxyUrl && typeof Bridge.setProxyUrl === "function") Bridge.setProxyUrl(S.proxyUrl);
-
-  applyTheme(S.theme);
-
-  store.set({ trafik });
-  document.querySelector("#trafikBtn")?.classList.toggle("aktif", S.trafik);
-  if (S.trafik) mc.trafikYukle();
-
-  store.set({ ispark });
-  document.querySelector("#isparkBtn")?.classList.toggle("aktif", S.ispark);
-  if (S.ispark) mc.isparkYukle();
-
-  if (typeof DataProvider?.connectStream === "function") {
-    DataProvider.connectStream({
-      onVehicles: (payload) => {
-        if (payload?.hat && Array.isArray(payload.vehicles) && S.aktifHatlar.has(payload.hat)) {
-          if (mc.konumIsle(payload.hat, payload.vehicles)) {
-            mc.aracCiz(payload.hat);
-            panelYenile();
-          }
-        }
-      },
-      onTraffic: () => {
-        if (S.trafik) mc.trafikYukle(true);
-      },
-    });
-  }
-
+  await settings.restore();
+  liveUpdates.connectStream();
   ciz(true);
 }
 

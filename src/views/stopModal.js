@@ -4,7 +4,7 @@
 import { Zaman } from "../core/time.js";
 import { Core } from "../core/geo.js";
 import { KV } from "../core/storage.js";
-import { Bridge } from "../core/bridge.js";
+import { applyMapStyle, saveProxyUrl } from "../app/settings.js";
 import { API } from "../core/api.js";
 import { iconSvg } from "../ui/icons.js";
 import { t, getLang, setLang } from "../i18n/index.js";
@@ -426,18 +426,14 @@ export function createStopModal(S, mc, callbacks) {
 
     document.querySelectorAll("#haritaStilSegment button").forEach((b) => {
       b.addEventListener("click", () => {
-        S.mapStyle = b.dataset.stil;
-        KV.set("mapStyle", S.mapStyle);
-        mc.updateBaseLayer();
+        applyMapStyle(S, mc, b.dataset.stil);
         document.querySelectorAll("#haritaStilSegment button").forEach((x) => x.classList.toggle("aktif", x === b));
       });
     });
 
     document.querySelector("#proxyKaydetBtn")?.addEventListener("click", () => {
       const val = document.querySelector("#proxyInput")?.value.trim() || "";
-      S.proxyUrl = val;
-      KV.set("proxyUrl", val);
-      if (typeof Bridge.setProxyUrl === "function") Bridge.setProxyUrl(val);
+      saveProxyUrl(S, val);
       const btn = document.querySelector("#proxyKaydetBtn");
       if (btn) btn.textContent = t("common.saved");
     });
